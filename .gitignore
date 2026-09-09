@@ -1,0 +1,76 @@
+# Java / Maven
+*.class
+*.jar
+*.war
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+release.properties
+dependency-reduced-pom.xml
+
+# IntelliJ IDEA / Eclipse / VS Code
+.idea/
+*.iml
+*.iws
+*.ipr
+.settings/
+.project
+.classpath
+.vscode/
+*.code-workspace
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+*.pid.lock
+hs_err_pid*
+
+# Environment variables, credentials, keys and certificates
+.env
+.env.*
+!.env.example
+!.env.template
+*.local
+*.local.*
+*local*.yml
+*local*.yaml
+*secret*
+*secrets*
+*credential*
+*credentials*
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
+# Local Spring configuration may contain database passwords and JWT secrets.
+**/src/main/resources/application-dev.yml
+**/src/main/resources/application-local.yml
+**/src/main/resources/application.yml
+**/src/main/resources/application-*.yml
+**/src/main/resources/application-*.yaml
+**/src/main/resources/application-*.local.yml
+**/src/main/resources/application-*.local.yaml
+
+# Database dumps / backups
+*.sql.gz
+*.dump
+*.bak
+backup/
+backups/
+
+# Temporary / personal files
+*.swp
+*.swo
+*.tmp
+*.temp
+*.orig
+*.rej
+*个人*
+*私有*
