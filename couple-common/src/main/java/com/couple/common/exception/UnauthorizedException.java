@@ -1,11 +1,13 @@
 package com.couple.common.exception;
 
+import org.springframework.http.HttpStatus;
+
 public class UnauthorizedException extends BusinessException {
     public UnauthorizedException() {
-        super(ErrorCode.UNAUTHORIZED);
+        super(HttpStatus.UNAUTHORIZED, "请先登录");
     }
 
     public UnauthorizedException(String message) {
-        super(ErrorCode.UNAUTHORIZED, message);
+        super(HttpStatus.UNAUTHORIZED, message);
     }
 }
