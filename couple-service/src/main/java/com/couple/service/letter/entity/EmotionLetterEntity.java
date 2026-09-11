@@ -17,6 +17,8 @@ public class EmotionLetterEntity {
     private Long id;
     private Long senderId;
     private Long receiverId;
+    private String threadId;
+    private Long replyToLetterId;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String title;
     private String content;
@@ -42,6 +44,10 @@ public class EmotionLetterEntity {
     public void setSenderId(Long senderId) { this.senderId = senderId; }
     public Long getReceiverId() { return receiverId; }
     public void setReceiverId(Long receiverId) { this.receiverId = receiverId; }
+    public String getThreadId() { return threadId; }
+    public void setThreadId(String threadId) { this.threadId = threadId; }
+    public Long getReplyToLetterId() { return replyToLetterId; }
+    public void setReplyToLetterId(Long replyToLetterId) { this.replyToLetterId = replyToLetterId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getContent() { return content; }
