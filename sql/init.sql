@@ -1,6 +1,6 @@
 -- ============================================================
 -- 情侣垃圾回收站 — 数据库初始化脚本
--- Phase 1 · 7 张核心表
+-- Phase 1 · 10 张核心表
 -- MySQL 8.x · utf8mb4
 -- ============================================================
 
@@ -124,23 +124,91 @@ CREATE TABLE `annotation` (
     INDEX `idx_author_id` (`author_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='批注表';
 
--- 6. 共识备忘录表
+-- 6. 共识备忘录表（一个话题线程对应一份备忘录）
 CREATE TABLE `consensus_memo` (
     `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '备忘录 ID',
-    `letter_id`       BIGINT       NOT NULL UNIQUE              COMMENT '关联的情绪信 ID（一对一）',
+    `thread_id`       CHAR(36)     NOT NULL                     COMMENT '关联的话题线程 ID（一对一）',
+    `title`           VARCHAR(100)                              COMMENT '事件标题',
     `root_cause`      TEXT                                      COMMENT '问题根源分析',
-    `self_promise`    TEXT                                      COMMENT '自己的承诺',
-    `partner_promise` TEXT                                      COMMENT '对方的承诺',
+    `common_ground`   TEXT                                      COMMENT '双方达成的共识',
     `secret_code`     VARCHAR(100)                              COMMENT '和解暗号（可含 emoji）',
+    `status`          VARCHAR(30)  NOT NULL DEFAULT 'PRIVATE_DRAFT' COMMENT '状态：PRIVATE_DRAFT/PENDING_REVIEW/ACTIVE/RESOLUTION_PENDING/RESOLVED',
+    `participant_a_id` BIGINT      NOT NULL                      COMMENT '参与方 A（较小用户 ID）',
+    `participant_b_id` BIGINT      NOT NULL                      COMMENT '参与方 B（较大用户 ID）',
+    `submitted_by`    BIGINT                                    COMMENT '最近提交确认的用户 ID',
+    `participant_a_confirmed_at` DATETIME                       COMMENT '参与方 A 确认时间',
+    `participant_b_confirmed_at` DATETIME                       COMMENT '参与方 B 确认时间',
+    `resolution_requested_by` BIGINT                            COMMENT '申请结束事件的用户 ID',
+    `current_revision_id` BIGINT                                COMMENT '当前生效或私密草稿版本 ID',
+    `pending_revision_id` BIGINT                                COMMENT '等待另一方处理的版本 ID',
+    `version`         INT          NOT NULL DEFAULT 1            COMMENT '当前备忘录版本号',
     `created_by`      BIGINT       NOT NULL                      COMMENT '创建者用户 ID',
+    `resolved_at`     DATETIME                                  COMMENT '双方确认解决时间',
     `created_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP     COMMENT '创建时间',
     `updated_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 
-    INDEX `idx_letter_id` (`letter_id`),
+    UNIQUE INDEX `uk_consensus_memo_thread` (`thread_id`),
+    INDEX `idx_memo_participants` (`participant_a_id`, `participant_b_id`),
     INDEX `idx_created_by` (`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='共识备忘录表';
 
--- 7. 操作日志表（审计）
+-- 7. 备忘录正文版本表（任何编辑都保留快照）
+CREATE TABLE `consensus_memo_revision` (
+    `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '备忘录版本 ID',
+    `memo_id`         BIGINT       NOT NULL                   COMMENT '备忘录 ID',
+    `version_no`      INT          NOT NULL                   COMMENT '版本号',
+    `title`           VARCHAR(100)                            COMMENT '事件标题快照',
+    `root_cause`      TEXT                                    COMMENT '问题根源快照',
+    `common_ground`   TEXT                                    COMMENT '共同结论快照',
+    `secret_code`     VARCHAR(100)                            COMMENT '和解暗号快照',
+    `changed_by`      BIGINT       NOT NULL                   COMMENT '修改人用户 ID',
+    `action`          VARCHAR(20)  NOT NULL DEFAULT 'UPDATE'  COMMENT '动作：CREATE/UPDATE',
+    `status`          VARCHAR(20)  NOT NULL DEFAULT 'PRIVATE' COMMENT '状态：PRIVATE/PENDING/ACCEPTED/RETURNED/SUPERSEDED',
+    `reviewed_by`     BIGINT                                  COMMENT '审核人用户 ID',
+    `reviewed_at`     DATETIME                                COMMENT '审核时间',
+    `review_note`     VARCHAR(500)                            COMMENT '退回沟通说明',
+    `created_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '版本创建时间',
+
+    UNIQUE INDEX `uk_memo_revision_version` (`memo_id`, `version_no`),
+    INDEX `idx_memo_revision_changed_by` (`changed_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='共识备忘录正文版本表';
+
+-- 8. 结构化承诺表（不允许物理删除）
+CREATE TABLE `memo_commitment` (
+    `id`                  BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '承诺 ID',
+    `memo_id`             BIGINT       NOT NULL                   COMMENT '所属备忘录 ID',
+    `owner_id`            BIGINT       NOT NULL                   COMMENT '承诺人用户 ID',
+    `status`              VARCHAR(30)  NOT NULL DEFAULT 'PRIVATE_DRAFT' COMMENT '状态：PRIVATE_DRAFT/PENDING_REVIEW/ACTIVE/CANCELLED',
+    `current_revision_id` BIGINT                                  COMMENT '当前生效版本 ID',
+    `pending_revision_id` BIGINT                                  COMMENT '等待确认版本 ID',
+    `created_by`          BIGINT       NOT NULL                   COMMENT '最初提出人用户 ID',
+    `created_at`          DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '创建时间',
+    `updated_at`          DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX `idx_commitment_memo` (`memo_id`, `created_at`),
+    INDEX `idx_commitment_owner` (`owner_id`),
+    INDEX `idx_commitment_pending_revision` (`pending_revision_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='备忘录结构化承诺表';
+
+-- 9. 承诺版本表（提出、修改、取消及确认结果全部留痕）
+CREATE TABLE `memo_commitment_revision` (
+    `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '承诺版本 ID',
+    `commitment_id`   BIGINT       NOT NULL                   COMMENT '承诺 ID',
+    `version_no`      INT          NOT NULL                   COMMENT '版本号',
+    `action`          VARCHAR(20)  NOT NULL                   COMMENT '动作：CREATE/UPDATE/CANCEL',
+    `content`         TEXT                                    COMMENT '承诺内容；取消申请沿用当前内容',
+    `proposed_by`     BIGINT       NOT NULL                   COMMENT '提出人用户 ID',
+    `status`          VARCHAR(20)  NOT NULL DEFAULT 'PRIVATE' COMMENT '状态：PRIVATE/PENDING/ACCEPTED/RETURNED/SUPERSEDED',
+    `reviewed_by`     BIGINT                                  COMMENT '确认或拒绝人用户 ID',
+    `reviewed_at`     DATETIME                                COMMENT '确认或拒绝时间',
+    `review_note`     VARCHAR(500)                            COMMENT '退回沟通说明',
+    `created_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP  COMMENT '提出时间',
+
+    UNIQUE INDEX `uk_commitment_revision_version` (`commitment_id`, `version_no`),
+    INDEX `idx_commitment_revision_status` (`commitment_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='承诺修改与确认历史表';
+
+-- 10. 操作日志表（审计）
 CREATE TABLE `letter_log` (
     `id`          BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '日志 ID',
     `letter_id`   BIGINT       NOT NULL                     COMMENT '相关情绪信 ID',
