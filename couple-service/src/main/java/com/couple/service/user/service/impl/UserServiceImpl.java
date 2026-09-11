@@ -6,6 +6,8 @@ import com.couple.common.exception.ConflictException;
 import com.couple.common.exception.NotFoundException;
 import com.couple.common.exception.UnauthorizedException;
 import com.couple.common.security.JwtTokenUtil;
+import com.couple.common.security.CurrentUser;
+import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.user.dto.PartnerRemarkUpdateRequest;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
@@ -63,17 +65,20 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final CoupleBindRequestMapper bindRequestMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AuthSessionService authSessionService;
     private final String jwtSecret;
     private final long jwtExpireSeconds;
 
     public UserServiceImpl(UserMapper userMapper,
                            CoupleBindRequestMapper bindRequestMapper,
                            PasswordEncoder passwordEncoder,
+                           AuthSessionService authSessionService,
                            @Value("${jwt.secret}") String jwtSecret,
                            @Value("${jwt.expire:86400}") long jwtExpireSeconds) {
         this.userMapper = userMapper;
         this.bindRequestMapper = bindRequestMapper;
         this.passwordEncoder = passwordEncoder;
+        this.authSessionService = authSessionService;
         this.jwtSecret = jwtSecret;
         this.jwtExpireSeconds = jwtExpireSeconds;
     }
@@ -118,7 +123,7 @@ public class UserServiceImpl implements UserService {
 
     /** 校验账户密码并签发 JWT。 */
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public UserLoginResponse login(UserLoginRequest request) {
         UserEntity user = userMapper.selectByUsername(request.username().trim());
         if (user == null || !passwordEncoder.matches(request.password(), user.getPassword())) {
@@ -126,13 +131,21 @@ public class UserServiceImpl implements UserService {
         }
 
         UserEntity partner = findPartner(user);
+        Duration tokenTtl = Duration.ofSeconds(jwtExpireSeconds);
+        String sessionId = authSessionService.createSession(user.getId(), user.getUsername(), tokenTtl);
         String token = JwtTokenUtil.createToken(
-                jwtSecret, user.getId(), user.getUsername(), Duration.ofSeconds(jwtExpireSeconds));
+                jwtSecret, user.getId(), user.getUsername(), sessionId, tokenTtl);
         return new UserLoginResponse(
                 user.getId(), user.getUsername(), user.getNickname(), user.getCoupleCode(),
                 token, jwtExpireSeconds,
                 isBound(user), user.getPartnerId(), partner == null ? null : partner.getNickname(),
                 user.getPartnerRemark(), membershipOf(user), DEFAULT_FLAGS, DEFAULT_LIMITS);
+    }
+
+    /** 撤销当前 JWT 对应的服务端会话。 */
+    @Override
+    public void logout(CurrentUser currentUser) {
+        authSessionService.revokeCurrentSession(currentUser);
     }
 
     /** 根据对方配对码创建待处理申请，不在此阶段修改双方伴侣关系。 */
