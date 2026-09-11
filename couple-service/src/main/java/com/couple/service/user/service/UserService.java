@@ -1,5 +1,6 @@
 package com.couple.service.user.service;
 
+import com.couple.common.security.CurrentUser;
 import com.couple.service.user.dto.PartnerRemarkUpdateRequest;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
@@ -23,6 +24,8 @@ public interface UserService {
     UserRegisterResponse register(UserRegisterRequest request);
 
     UserLoginResponse login(UserLoginRequest request);
+
+    void logout(CurrentUser currentUser);
 
     CoupleBindRequestView createBindRequest(Long userId, UserBindRequest request);
 
