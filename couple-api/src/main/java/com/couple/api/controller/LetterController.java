@@ -8,6 +8,7 @@ import com.couple.service.letter.service.LetterService;
 import com.couple.service.letter.vo.LetterDetailView;
 import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
+import com.couple.service.letter.vo.LetterThreadView;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -82,6 +83,12 @@ public class LetterController {
     @GetMapping("/{letterId}")
     public ApiResponse<LetterDetailView> detail(@PathVariable Long letterId) {
         return ApiResponse.success(letterService.detail(UserContext.requireUserId(), letterId));
+    }
+
+    /** 查询当前用户可见的同话题信件时间线。 */
+    @GetMapping("/{letterId}/thread")
+    public ApiResponse<LetterThreadView> thread(@PathVariable Long letterId) {
+        return ApiResponse.success(letterService.thread(UserContext.requireUserId(), letterId));
     }
 
     /** 当前用户是该信接收方时，首次打开后标记已读。 */
