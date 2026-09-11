@@ -23,16 +23,21 @@ public final class UserContext {
         return HOLDER.get();
     }
 
+    /** 返回当前认证用户的完整身份和会话信息。 */
+    public static CurrentUser requireUser() {
+        CurrentUser user = get();
+        if (user == null) {
+            throw new com.couple.common.exception.UnauthorizedException();
+        }
+        return user;
+    }
+
     /**
      * 返回当前用户 ID。
      * @throws com.couple.common.exception.UnauthorizedException 当前请求尚未通过认证
      */
     public static Long requireUserId() {
-        CurrentUser user = get();
-        if (user == null) {
-            throw new com.couple.common.exception.UnauthorizedException();
-        }
-        return user.userId();
+        return requireUser().userId();
     }
 
     /** 清除当前线程中的用户信息，通常由拦截器的请求完成回调调用。 */
