@@ -9,6 +9,8 @@ import com.couple.service.letter.vo.LetterDetailView;
 import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
 import com.couple.service.letter.vo.LetterThreadView;
+import com.couple.service.memo.service.MemoService;
+import com.couple.service.memo.vo.ConsensusMemoView;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,9 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class LetterController {
 
     private final LetterService letterService;
+    private final MemoService memoService;
 
-    public LetterController(LetterService letterService) {
+    public LetterController(LetterService letterService, MemoService memoService) {
         this.letterService = letterService;
+        this.memoService = memoService;
     }
 
     /** 创建只对发送方可见的情绪信草稿。 */
@@ -91,13 +95,19 @@ public class LetterController {
         return ApiResponse.success(letterService.thread(UserContext.requireUserId(), letterId));
     }
 
+    /** 通过线程中的任意一封可见信件查询该事件的共识备忘录。 */
+    @GetMapping("/{letterId}/memo")
+    public ApiResponse<ConsensusMemoView> memo(@PathVariable Long letterId) {
+        return ApiResponse.success(memoService.getByLetter(UserContext.requireUserId(), letterId));
+    }
+
     /** 当前用户是该信接收方时，首次打开后标记已读。 */
     @PostMapping("/read/{letterId}")
     public ApiResponse<LetterOperationResponse> read(@PathVariable Long letterId) {
         return ApiResponse.success(letterService.read(UserContext.requireUserId(), letterId));
     }
 
-    /** 由该信接收方确认问题已经解决。 */
+    /** 由该信接收方将单封信标记为已处理；整个线程的结束以备忘录双方确认为准。 */
     @PostMapping("/resolve/{letterId}")
     public ApiResponse<LetterOperationResponse> resolve(@PathVariable Long letterId) {
         return ApiResponse.success(letterService.resolve(UserContext.requireUserId(), letterId));

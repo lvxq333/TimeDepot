@@ -238,7 +238,7 @@ public class LetterServiceImpl implements LetterService {
         return operation(letter, null, "信件已读");
     }
 
-    /** 仅接收方可确认问题已解决；模型后期只提供提示，不直接改变状态。 */
+    /** 仅接收方可将单封信标记为已处理；线程级解决状态由共识备忘录维护。 */
     @Override
     @Transactional
     public LetterOperationResponse resolve(Long userId, Long letterId) {
@@ -255,7 +255,7 @@ public class LetterServiceImpl implements LetterService {
         updateOrFail(letter);
         writeLog(letterId, userId, "RESOLVE", "接收方确认情绪问题已解决", now);
 
-        // TODO(LLM): 后期可向接收方展示温和的解决建议，但必须由用户确认后才能调用本操作。
+        // TODO(LLM): 后期可温和建议发起线程解决申请，但必须由双方在备忘录流程中确认。
         return operation(letter, null, "已将这封信标记为已解决");
     }
 
