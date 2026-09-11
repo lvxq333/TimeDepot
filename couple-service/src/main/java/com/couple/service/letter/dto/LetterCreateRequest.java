@@ -14,5 +14,6 @@ public record LetterCreateRequest(
         @NotBlank(message = "请选择情绪标签")
         @Pattern(regexp = "angry|sad|doubt|hurt|suggest", message = "情绪标签不合法") String emotionTag,
         @Min(value = 1, message = "情绪强度不能小于 1")
-        @Max(value = 10, message = "情绪强度不能大于 10") Integer intensity) {
+        @Max(value = 10, message = "情绪强度不能大于 10") Integer intensity,
+        Long replyToLetterId) {
 }
