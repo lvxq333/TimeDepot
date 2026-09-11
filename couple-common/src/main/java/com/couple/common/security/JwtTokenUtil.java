@@ -23,14 +23,17 @@ public final class JwtTokenUtil {
      * @param secret 用于 HMAC 签名的密钥，UTF-8 编码后至少 32 字节
      * @param userId 用户 ID，将作为 JWT subject
      * @param username 用户名，将写入自定义声明
+     * @param sessionId MySQL 会话表中的唯一会话标识
      * @param ttl 从当前时间开始的有效期
      * @return 已签名的紧凑 JWT 字符串
      */
-    public static String createToken(String secret, Long userId, String username, Duration ttl) {
+    public static String createToken(String secret, Long userId, String username,
+                                     String sessionId, Duration ttl) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("username", username)
+                .claim("sid", sessionId)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(ttl)))
                 .signWith(key(secret))
@@ -51,7 +54,13 @@ public final class JwtTokenUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            return new CurrentUser(Long.valueOf(claims.getSubject()), claims.get("username", String.class));
+            String sessionId = claims.get("sid", String.class);
+            if (sessionId == null || sessionId.isBlank()) {
+                throw new UnauthorizedException("Token 缺少会话信息");
+            }
+            return new CurrentUser(Long.valueOf(claims.getSubject()),
+                    claims.get("username", String.class), sessionId,
+                    claims.getExpiration().toInstant());
         } catch (Exception e) {
             throw new UnauthorizedException("Token 无效或已过期");
         }
