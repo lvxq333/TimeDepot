@@ -1,6 +1,6 @@
 -- ============================================================
 -- 情侣垃圾回收站 — 数据库初始化脚本
--- Phase 1 · 6 张核心表
+-- Phase 1 · 7 张核心表
 -- MySQL 8.x · utf8mb4
 -- ============================================================
 
@@ -34,7 +34,29 @@ CREATE TABLE `user` (
     INDEX `idx_membership_plan`   (`membership_plan`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
--- 2. 情侣绑定申请表
+-- 2. 登录会话表（MySQL 为权威数据源，Redis 为访问缓存）
+CREATE TABLE `auth_session` (
+    `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '会话记录 ID',
+    `session_id`      VARCHAR(64)  NOT NULL                    COMMENT 'JWT sid，对外不暴露数据库主键',
+    `user_id`         BIGINT       NOT NULL                    COMMENT '所属用户 ID',
+    `username`        VARCHAR(50)  NOT NULL                    COMMENT '签发时用户名，用于校验 JWT 身份',
+    `status`          VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE'   COMMENT '状态：ACTIVE/REVOKED/EXPIRED',
+    `device_name`     VARCHAR(128)                             COMMENT '设备名称，后续设备管理使用',
+    `client_ip`       VARCHAR(64)                              COMMENT '登录 IP，兼容 IPv6',
+    `issued_at`       DATETIME     NOT NULL                    COMMENT '签发时间',
+    `expires_at`      DATETIME     NOT NULL                    COMMENT '绝对过期时间',
+    `last_active_at`  DATETIME     NOT NULL                    COMMENT '最后活跃时间',
+    `revoked_at`      DATETIME                                 COMMENT '撤销时间',
+    `revoke_reason`   VARCHAR(64)                              COMMENT '撤销原因',
+    `created_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP   COMMENT '创建时间',
+    `updated_at`      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE INDEX `uk_auth_session_id` (`session_id`),
+    INDEX `idx_auth_session_user_status` (`user_id`, `status`),
+    INDEX `idx_auth_session_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='登录会话表';
+
+-- 3. 情侣绑定申请表
 CREATE TABLE `couple_bind_request` (
     `id`                  BIGINT      PRIMARY KEY AUTO_INCREMENT COMMENT '申请 ID',
     `requester_id`        BIGINT      NOT NULL                    COMMENT '申请方用户 ID',
@@ -53,7 +75,7 @@ CREATE TABLE `couple_bind_request` (
     CONSTRAINT `chk_bind_request_not_self` CHECK (`requester_id` <> `receiver_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='情侣绑定申请表';
 
--- 3. 情绪信表（核心业务表）
+-- 4. 情绪信表（核心业务表）
 CREATE TABLE `emotion_letter` (
     `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '情绪信 ID',
     `sender_id`       BIGINT       NOT NULL                     COMMENT '发送方用户 ID',
@@ -80,7 +102,7 @@ CREATE TABLE `emotion_letter` (
     INDEX `idx_created_at`       (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='情绪信表';
 
--- 4. 批注表
+-- 5. 批注表
 CREATE TABLE `annotation` (
     `id`            BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '批注 ID',
     `letter_id`     BIGINT       NOT NULL                     COMMENT '所属情绪信 ID',
@@ -98,7 +120,7 @@ CREATE TABLE `annotation` (
     INDEX `idx_author_id` (`author_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='批注表';
 
--- 5. 共识备忘录表
+-- 6. 共识备忘录表
 CREATE TABLE `consensus_memo` (
     `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '备忘录 ID',
     `letter_id`       BIGINT       NOT NULL UNIQUE              COMMENT '关联的情绪信 ID（一对一）',
@@ -114,7 +136,7 @@ CREATE TABLE `consensus_memo` (
     INDEX `idx_created_by` (`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='共识备忘录表';
 
--- 6. 操作日志表（审计）
+-- 7. 操作日志表（审计）
 CREATE TABLE `letter_log` (
     `id`          BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '日志 ID',
     `letter_id`   BIGINT       NOT NULL                     COMMENT '相关情绪信 ID',
