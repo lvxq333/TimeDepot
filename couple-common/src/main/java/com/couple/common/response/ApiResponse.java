@@ -5,7 +5,8 @@ import org.springframework.http.HttpStatus;
 
 /**
  * REST 接口统一响应体：code 为标准 HTTP 状态码，message 为提示，data 为业务数据。
- * <p>当前 success 方法生成 200，failure 方法接受 4xx 或 5xx。
+ * <p>默认 success 方法生成 200，也可显式生成 201 等其他 2xx 状态；
+ * failure 方法接受 4xx 或 5xx。
  * 此类仅构建 JSON 数据，不会自动设置 HTTP 响应状态；失败状态由全局处理器设置。</p>
  * @param <T> 响应数据类型，例如用户 VO、列表或分页结果，与请求 DTO 类型无关
  */
@@ -37,6 +38,19 @@ public final class ApiResponse<T> {
      */
     public static <T> ApiResponse<T> success(T data) {
         return new ApiResponse<>(200, "success", data);
+    }
+
+    /**
+     * 构建指定 2xx 状态的成功响应，用于创建资源等需要返回 201 的场景。
+     * @param status 标准 2xx HTTP 状态
+     * @param data 需要返回给前端的数据
+     * @throws IllegalArgumentException 当状态不是 2xx 时抛出
+     */
+    public static <T> ApiResponse<T> success(HttpStatus status, T data) {
+        if (!status.is2xxSuccessful()) {
+            throw new IllegalArgumentException("成功响应必须使用 2xx 状态");
+        }
+        return new ApiResponse<>(status.value(), "success", data);
     }
 
     /** 构建无业务数据的成功响应，例如修改成功后只需返回确认结果。 */
