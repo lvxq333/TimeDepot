@@ -57,6 +57,13 @@ public class UserController {
         return ApiResponse.success(userService.login(request));
     }
 
+    /** 撤销当前 Token 对应的服务端会话。 */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout() {
+        userService.logout(UserContext.requireUser());
+        return ResponseEntity.noContent().build();
+    }
+
     /** 使用对方配对码发送绑定申请，发送后不会立即建立关系。 */
     @PostMapping("/bind-requests")
     public ResponseEntity<ApiResponse<CoupleBindRequestView>> createBindRequest(
