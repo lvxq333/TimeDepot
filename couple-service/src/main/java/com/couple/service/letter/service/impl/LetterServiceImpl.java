@@ -17,6 +17,7 @@ import com.couple.service.letter.vo.LetterDetailView;
 import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
 import com.couple.service.letter.vo.LetterSummaryView;
+import com.couple.service.letter.vo.LetterThreadView;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /** 情绪信业务实现，以数据库状态和冷静期结束时间作为最终一致性依据。 */
 @Service
@@ -60,12 +62,18 @@ public class LetterServiceImpl implements LetterService {
         this.cooldownSeconds = Math.max(1, cooldownSeconds);
     }
 
-    /** 为当前已绑定用户创建草稿，接收方固定为当前伴侣。 */
+    /** 为当前已绑定用户创建草稿；回复信会继承原信话题并发送给原信作者。 */
     @Override
     @Transactional
     public LetterOperationResponse create(Long userId, LetterCreateRequest request) {
         UserEntity sender = requireBoundUser(userId);
         UserEntity receiver = requireUser(sender.getPartnerId());
+        EmotionLetterEntity parent = null;
+        if (request.replyToLetterId() != null) {
+            parent = requireLockedLetter(request.replyToLetterId());
+            requireReplyTarget(userId, parent, receiver);
+            receiver = requireUser(parent.getSenderId());
+        }
         if (!Objects.equals(receiver.getPartnerId(), userId) || !BOUND.equals(receiver.getRelationshipStatus())) {
             throw new ConflictException("伴侣关系状态异常，请重新确认绑定状态");
         }
@@ -74,6 +82,9 @@ public class LetterServiceImpl implements LetterService {
         EmotionLetterEntity letter = new EmotionLetterEntity();
         letter.setSenderId(userId);
         letter.setReceiverId(receiver.getId());
+        letter.setThreadId(parent == null || parent.getThreadId() == null
+                ? UUID.randomUUID().toString() : parent.getThreadId());
+        letter.setReplyToLetterId(request.replyToLetterId());
         applyContent(letter, request.title(), request.content(), request.emotionTag(), request.intensity());
         letter.setStatus(DRAFT);
         letter.setIsRead(0);
@@ -194,6 +205,19 @@ public class LetterServiceImpl implements LetterService {
         return toDetail(userId, letter);
     }
 
+    /** 查询当前用户可见的话题时间线；未发送的对方草稿和冷静期信不会泄露。 */
+    @Override
+    @Transactional(readOnly = true)
+    public LetterThreadView thread(Long userId, Long letterId) {
+        EmotionLetterEntity anchor = letterMapper.selectById(letterId);
+        if (anchor == null) throw new NotFoundException("情绪信不存在");
+        detail(userId, letterId);
+        List<EmotionLetterEntity> letters = letterMapper.selectVisibleThread(userId, anchor.getThreadId());
+        List<LetterDetailView> views = letters.stream().map(letter -> toDetail(userId, letter)).toList();
+        String title = views.isEmpty() ? anchor.getTitle() : views.get(0).title();
+        return new LetterThreadView(anchor.getThreadId(), title, views);
+    }
+
     /** 接收方首次打开信件时标记已读；重复调用保持幂等。 */
     @Override
     @Transactional
@@ -283,6 +307,18 @@ public class LetterServiceImpl implements LetterService {
         }
     }
 
+    private void requireReplyTarget(Long userId, EmotionLetterEntity parent, UserEntity currentPartner) {
+        if (!Objects.equals(userId, parent.getReceiverId())
+                || !Set.of(SENT, READ, RESOLVED).contains(parent.getStatus())) {
+            throw new ForbiddenException("只能回复已经收到的伴侣信件");
+        }
+        if (!Objects.equals(currentPartner.getId(), parent.getSenderId())
+                || !Objects.equals(currentPartner.getPartnerId(), userId)
+                || !BOUND.equals(currentPartner.getRelationshipStatus())) {
+            throw new ConflictException("原信发送方已不是当前伴侣，无法回复");
+        }
+    }
+
     private void requireStatus(EmotionLetterEntity letter, String expected, String message) {
         if (!expected.equals(letter.getStatus())) throw new ConflictException(message);
     }
@@ -361,7 +397,8 @@ public class LetterServiceImpl implements LetterService {
         UserEntity receiver = requireUser(letter.getReceiverId());
         return new LetterSummaryView(letter.getId(), letter.getTitle(), letter.getEmotionTag(),
                 letter.getIntensity(), letter.getStatus(), sender.getId(), sender.getNickname(),
-                receiver.getId(), receiver.getNickname(), directionOf(userId, letter),
+                receiver.getId(), receiver.getNickname(), letter.getThreadId(),
+                letter.getReplyToLetterId(), directionOf(userId, letter),
                 Objects.equals(letter.getIsRead(), 1), letter.getCreatedAt(), letter.getSentAt(),
                 letter.getReadAt());
     }
@@ -371,7 +408,8 @@ public class LetterServiceImpl implements LetterService {
         UserEntity receiver = requireUser(letter.getReceiverId());
         return new LetterDetailView(letter.getId(), letter.getTitle(), letter.getContent(),
                 letter.getEmotionTag(), letter.getIntensity(), letter.getStatus(), sender.getId(),
-                sender.getNickname(), receiver.getId(), receiver.getNickname(),
+                sender.getNickname(), receiver.getId(), receiver.getNickname(), letter.getThreadId(),
+                letter.getReplyToLetterId(),
                 directionOf(userId, letter), Objects.equals(letter.getIsRead(), 1),
                 letter.getReadAt(), letter.getCreatedAt(), letter.getSentAt(),
                 letter.getResolvedAt(), letter.getCoolDownEnd(), List.of(), null);
