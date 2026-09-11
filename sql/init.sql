@@ -80,6 +80,8 @@ CREATE TABLE `emotion_letter` (
     `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '情绪信 ID',
     `sender_id`       BIGINT       NOT NULL                     COMMENT '发送方用户 ID',
     `receiver_id`     BIGINT       NOT NULL                     COMMENT '接收方用户 ID',
+    `thread_id`       CHAR(36)     NOT NULL                     COMMENT '同一话题 ID',
+    `reply_to_letter_id` BIGINT                                  COMMENT '直接回复的上一封信 ID',
     `title`           VARCHAR(100)                               COMMENT '信标题',
     `content`         TEXT         NOT NULL                      COMMENT '信内容（最长 5000 字）',
     `emotion_tag`     VARCHAR(20)  NOT NULL                      COMMENT '情绪标签：angry/sad/doubt/hurt/suggest',
@@ -99,6 +101,8 @@ CREATE TABLE `emotion_letter` (
     INDEX `idx_status`           (`status`),
     INDEX `idx_sender_status`    (`sender_id`, `status`),
     INDEX `idx_receiver_status`  (`receiver_id`, `status`),
+    INDEX `idx_thread_created_at` (`thread_id`, `created_at`),
+    INDEX `idx_reply_to_letter_id` (`reply_to_letter_id`),
     INDEX `idx_created_at`       (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='情绪信表';
 
