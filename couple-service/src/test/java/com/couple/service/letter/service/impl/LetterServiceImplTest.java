@@ -16,6 +16,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,6 +30,7 @@ class LetterServiceImplTest {
     private final Map<Long, UserEntity> users = new HashMap<>();
     private EmotionLetterEntity selectedLetter;
     private EmotionLetterEntity insertedLetter;
+    private List<EmotionLetterEntity> visibleThread;
     private int letterInsertCount;
     private int letterUpdateCount;
     private int logInsertCount;
@@ -38,6 +40,7 @@ class LetterServiceImplTest {
     void setUp() {
         selectedLetter = null;
         insertedLetter = null;
+        visibleThread = List.of();
         letterInsertCount = 0;
         letterUpdateCount = 0;
         logInsertCount = 0;
@@ -54,6 +57,7 @@ class LetterServiceImplTest {
                     yield 0;
                 }
                 case "selectByIdForUpdate", "selectById" -> selectedLetter;
+                case "selectVisibleThread" -> visibleThread;
                 case "updateById" -> {
                     letterUpdateCount++;
                     yield 1;
@@ -82,7 +86,7 @@ class LetterServiceImplTest {
         users.put(2L, user(2L, 1L, "乙", "BOUND"));
 
         LetterOperationResponse response = service.create(
-                1L, new LetterCreateRequest("  标题  ", "  内容  ", "sad", null));
+                1L, new LetterCreateRequest("  标题  ", "  内容  ", "sad", null, null));
 
         assertEquals(10L, response.letterId());
         assertEquals("DRAFT", response.status());
@@ -98,8 +102,45 @@ class LetterServiceImplTest {
         users.put(1L, user(1L, null, "甲", "UNBOUND"));
 
         assertThrows(ConflictException.class, () -> service.create(
-                1L, new LetterCreateRequest(null, "内容", "sad", 5)));
+                1L, new LetterCreateRequest(null, "内容", "sad", 5, null)));
         assertEquals(0, letterInsertCount);
+    }
+
+    @Test
+    void replyInheritsThreadAndTargetsOriginalSender() {
+        users.put(1L, user(1L, 2L, "甲", "BOUND"));
+        users.put(2L, user(2L, 1L, "乙", "BOUND"));
+        selectedLetter = letter(10L, 2L, 1L, "READ");
+        selectedLetter.setThreadId("thread-1");
+        selectedLetter.setIsRead(1);
+
+        LetterOperationResponse response = service.create(
+                1L, new LetterCreateRequest("回复", "回应内容", "suggest", 5, 10L));
+
+        assertEquals("DRAFT", response.status());
+        assertEquals("thread-1", insertedLetter.getThreadId());
+        assertEquals(10L, insertedLetter.getReplyToLetterId());
+        assertEquals(2L, insertedLetter.getReceiverId());
+    }
+
+    @Test
+    void threadReturnsVisibleLettersInTimelineOrder() {
+        users.put(1L, user(1L, 2L, "甲", "BOUND"));
+        users.put(2L, user(2L, 1L, "乙", "BOUND"));
+        selectedLetter = letter(10L, 1L, 2L, "READ");
+        selectedLetter.setThreadId("thread-1");
+        selectedLetter.setIsRead(1);
+        EmotionLetterEntity reply = letter(11L, 2L, 1L, "SENT");
+        reply.setThreadId("thread-1");
+        reply.setReplyToLetterId(10L);
+        visibleThread = List.of(selectedLetter, reply);
+
+        var response = service.thread(1L, 10L);
+
+        assertEquals("thread-1", response.threadId());
+        assertEquals(2, response.letters().size());
+        assertEquals(11L, response.letters().get(1).letterId());
+        assertEquals(10L, response.letters().get(1).replyToLetterId());
     }
 
     @Test
