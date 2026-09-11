@@ -5,6 +5,7 @@ import com.couple.api.config.JwtProperties;
 import com.couple.common.security.CurrentUser;
 import com.couple.common.security.JwtTokenUtil;
 import com.couple.common.security.UserContext;
+import com.couple.service.auth.service.AuthSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
@@ -15,10 +16,12 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     /** JWT 密钥等认证配置。 */
     private final JwtProperties jwtProperties;
+    private final AuthSessionService authSessionService;
 
     /** 创建使用指定 JWT 配置的认证拦截器。 */
-    public JwtAuthInterceptor(JwtProperties jwtProperties) {
+    public JwtAuthInterceptor(JwtProperties jwtProperties, AuthSessionService authSessionService) {
         this.jwtProperties = jwtProperties;
+        this.authSessionService = authSessionService;
     }
 
     /**
@@ -39,6 +42,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         }
 
         CurrentUser user = JwtTokenUtil.parse(jwtProperties.getSecret(), authorization.substring(7).trim());
+        authSessionService.requireActiveSession(user);
         UserContext.set(user);
         return true;
     }
