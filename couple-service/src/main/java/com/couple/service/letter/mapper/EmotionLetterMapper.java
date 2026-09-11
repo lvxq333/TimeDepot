@@ -36,6 +36,12 @@ public interface EmotionLetterMapper extends BaseMapper<EmotionLetterEntity> {
                                                  @Param("offset") long offset,
                                                  @Param("pageSize") int pageSize);
 
+    @Select("SELECT * FROM emotion_letter WHERE is_deleted = 0 AND thread_id = #{threadId} "
+            + "AND (sender_id = #{userId} OR (receiver_id = #{userId} "
+            + "AND status IN ('SENT','READ','RESOLVED'))) ORDER BY created_at ASC, id ASC")
+    List<EmotionLetterEntity> selectVisibleThread(@Param("userId") Long userId,
+                                                  @Param("threadId") String threadId);
+
     @Select("<script>SELECT COUNT(*) FROM emotion_letter WHERE is_deleted = 0 "
             + "<choose>"
             + "<when test='direction == \"sent\"'>AND sender_id = #{userId} </when>"
