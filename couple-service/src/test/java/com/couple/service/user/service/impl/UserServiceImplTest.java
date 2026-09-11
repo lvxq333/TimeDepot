@@ -3,6 +3,8 @@ package com.couple.service.user.service.impl;
 import com.couple.common.exception.BadRequestException;
 import com.couple.common.exception.ConflictException;
 import com.couple.common.exception.UnauthorizedException;
+import com.couple.common.security.CurrentUser;
+import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
 import com.couple.service.user.dto.UserRegisterRequest;
@@ -21,6 +23,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +60,22 @@ class UserServiceImplTest {
                 return ("encoded:" + rawPassword).equals(encodedPassword);
             }
         };
-        userService = new UserServiceImpl(mapper, bindRequestMapper, encoder, JWT_SECRET, 86400);
+        AuthSessionService authSessionService = new AuthSessionService() {
+            @Override
+            public String createSession(Long userId, String username, Duration ttl) {
+                return "test-session-id";
+            }
+
+            @Override
+            public void requireActiveSession(CurrentUser currentUser) {
+            }
+
+            @Override
+            public void revokeCurrentSession(CurrentUser currentUser) {
+            }
+        };
+        userService = new UserServiceImpl(
+                mapper, bindRequestMapper, encoder, authSessionService, JWT_SECRET, 86400);
     }
 
     @Test
