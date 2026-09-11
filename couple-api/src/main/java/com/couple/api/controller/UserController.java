@@ -63,7 +63,8 @@ public class UserController {
             @Valid @RequestBody UserBindRequest request) {
         CoupleBindRequestView result = userService.createBindRequest(
                 UserContext.requireUserId(), request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(HttpStatus.CREATED, result));
     }
 
     /** 查询当前用户收到的绑定申请。 */
