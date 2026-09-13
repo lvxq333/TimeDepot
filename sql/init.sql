@@ -111,6 +111,7 @@ CREATE TABLE `annotation` (
     `id`            BIGINT       PRIMARY KEY AUTO_INCREMENT  COMMENT '批注 ID',
     `letter_id`     BIGINT       NOT NULL                     COMMENT '所属情绪信 ID',
     `author_id`     BIGINT       NOT NULL                     COMMENT '批注人用户 ID',
+    `parent_annotation_id` BIGINT                             COMMENT '回复所属的顶层批注 ID，顶层批注为空',
     `quote_text`    VARCHAR(500) NOT NULL                     COMMENT '引用的原文片段',
     `quote_start`   INT          NOT NULL                     COMMENT '在 content 中的起始位置（字符偏移）',
     `quote_end`     INT          NOT NULL                     COMMENT '在 content 中的结束位置（字符偏移）',
@@ -121,7 +122,8 @@ CREATE TABLE `annotation` (
     `updated_at`    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 
     INDEX `idx_letter_id` (`letter_id`),
-    INDEX `idx_author_id` (`author_id`)
+    INDEX `idx_author_id` (`author_id`),
+    INDEX `idx_annotation_parent` (`parent_annotation_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='批注表';
 
 -- 6. 共识备忘录表（一个话题线程对应一份备忘录）
