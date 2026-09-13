@@ -42,6 +42,33 @@ public interface EmotionLetterMapper extends BaseMapper<EmotionLetterEntity> {
     List<EmotionLetterEntity> selectVisibleThread(@Param("userId") Long userId,
                                                   @Param("threadId") String threadId);
 
+    /** 先按最近活动的线程分页，再取当前页中的已发送信件，避免全量加载历史记录。 */
+    @Select("SELECT letter.* FROM emotion_letter letter JOIN ("
+            + "SELECT thread_id, MAX(created_at) AS last_reply_at FROM emotion_letter "
+            + "WHERE is_deleted = 0 AND status IN ('SENT','READ','RESOLVED') "
+            + "AND (sender_id = #{userId} OR receiver_id = #{userId}) "
+            + "GROUP BY thread_id ORDER BY last_reply_at DESC LIMIT #{pageSize} OFFSET #{offset}"
+            + ") event_page ON event_page.thread_id = letter.thread_id "
+            + "WHERE letter.is_deleted = 0 AND letter.status IN ('SENT','READ','RESOLVED') "
+            + "AND (letter.sender_id = #{userId} OR letter.receiver_id = #{userId}) "
+            + "ORDER BY event_page.last_reply_at DESC, letter.created_at ASC, letter.id ASC")
+    List<EmotionLetterEntity> selectSharedEventPage(@Param("userId") Long userId,
+                                                     @Param("offset") long offset,
+                                                     @Param("pageSize") int pageSize);
+
+    /** 查询一个事件中双方都已实际拥有的信件。 */
+    @Select("SELECT * FROM emotion_letter WHERE is_deleted = 0 AND thread_id = #{threadId} "
+            + "AND status IN ('SENT','READ','RESOLVED') "
+            + "AND (sender_id = #{userId} OR receiver_id = #{userId}) "
+            + "ORDER BY created_at ASC, id ASC")
+    List<EmotionLetterEntity> selectSharedEventThread(@Param("userId") Long userId,
+                                                       @Param("threadId") String threadId);
+
+    @Select("SELECT COUNT(DISTINCT thread_id) FROM emotion_letter WHERE is_deleted = 0 "
+            + "AND status IN ('SENT','READ','RESOLVED') "
+            + "AND (sender_id = #{userId} OR receiver_id = #{userId})")
+    long countSharedEvents(@Param("userId") Long userId);
+
     @Select("<script>SELECT COUNT(*) FROM emotion_letter WHERE is_deleted = 0 "
             + "<choose>"
             + "<when test='direction == \"sent\"'>AND sender_id = #{userId} </when>"
