@@ -3,6 +3,7 @@ package com.couple.api.controller;
 import com.couple.common.response.ApiResponse;
 import com.couple.common.security.UserContext;
 import com.couple.service.annotation.dto.AnnotationCreateRequest;
+import com.couple.service.annotation.dto.AnnotationReplyRequest;
 import com.couple.service.annotation.service.AnnotationService;
 import com.couple.service.annotation.vo.AnnotationDeleteResponse;
 import com.couple.service.annotation.vo.AnnotationListResponse;
@@ -37,6 +38,15 @@ public class AnnotationController {
     @GetMapping("/list/{letterId}")
     public ApiResponse<AnnotationListResponse> list(@PathVariable Long letterId) {
         return ApiResponse.success(annotationService.list(UserContext.requireUserId(), letterId));
+    }
+
+    /** 回复一条批注；回复任意子项都会归入同一个顶层讨论串。 */
+    @PostMapping("/{annotationId}/replies")
+    public ApiResponse<AnnotationView> reply(
+            @PathVariable Long annotationId,
+            @Valid @RequestBody AnnotationReplyRequest request) {
+        return ApiResponse.success(annotationService.reply(
+                UserContext.requireUserId(), annotationId, request));
     }
 
     /** 作者逻辑删除自己的批注。 */

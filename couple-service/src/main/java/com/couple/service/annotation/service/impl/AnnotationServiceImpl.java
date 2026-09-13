@@ -2,9 +2,11 @@ package com.couple.service.annotation.service.impl;
 
 import com.couple.common.exception.BadRequestException;
 import com.couple.common.exception.BusinessException;
+import com.couple.common.exception.ConflictException;
 import com.couple.common.exception.ForbiddenException;
 import com.couple.common.exception.NotFoundException;
 import com.couple.service.annotation.dto.AnnotationCreateRequest;
+import com.couple.service.annotation.dto.AnnotationReplyRequest;
 import com.couple.service.annotation.entity.AnnotationEntity;
 import com.couple.service.annotation.mapper.AnnotationMapper;
 import com.couple.service.annotation.service.AnnotationService;
@@ -74,6 +76,35 @@ public class AnnotationServiceImpl implements AnnotationService {
     }
 
     @Override
+    @Transactional
+    public AnnotationView reply(Long userId, Long annotationId, AnnotationReplyRequest request) {
+        AnnotationEntity target = annotationMapper.selectByIdForUpdate(annotationId);
+        if (target == null) throw new NotFoundException("要回复的批注不存在");
+        AnnotationEntity root = target.getParentAnnotationId() == null
+                ? target : annotationMapper.selectByIdForUpdate(target.getParentAnnotationId());
+        if (root == null) throw new NotFoundException("原始批注不存在");
+        EmotionLetterEntity letter = requireVisibleDeliveredLetter(userId, root.getLetterId(), true);
+
+        LocalDateTime now = LocalDateTime.now();
+        AnnotationEntity reply = new AnnotationEntity();
+        reply.setLetterId(letter.getId());
+        reply.setAuthorId(userId);
+        reply.setParentAnnotationId(root.getId());
+        reply.setQuoteText(root.getQuoteText());
+        reply.setQuoteStart(root.getQuoteStart());
+        reply.setQuoteEnd(root.getQuoteEnd());
+        reply.setContent(request.content().trim());
+        reply.setIsDeleted(0);
+        reply.setCreatedAt(now);
+        reply.setUpdatedAt(now);
+        if (annotationMapper.insert(reply) != 1) {
+            throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "回复保存失败，请稍后重试");
+        }
+        writeLog(letter.getId(), userId, "REPLY_ANNOTATION", "回复原文批注", now);
+        return toView(reply, requireAuthor(userId).getNickname());
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public AnnotationListResponse list(Long userId, Long letterId) {
         requireVisibleDeliveredLetter(userId, letterId, false);
@@ -96,6 +127,10 @@ public class AnnotationServiceImpl implements AnnotationService {
             throw new ForbiddenException("只能删除自己创建的批注");
         }
         requireVisibleDeliveredLetter(userId, annotation.getLetterId(), true);
+        if (annotation.getParentAnnotationId() == null
+                && annotationMapper.countActiveReplies(annotationId) > 0) {
+            throw new ConflictException("这条批注已有回复，暂不能删除");
+        }
         LocalDateTime now = LocalDateTime.now();
         if (annotationMapper.deleteById(annotationId) != 1) {
             throw new BusinessException(HttpStatus.CONFLICT, "批注状态已发生变化，请刷新后重试");
@@ -136,7 +171,8 @@ public class AnnotationServiceImpl implements AnnotationService {
 
     private AnnotationView toView(AnnotationEntity annotation, String authorNickname) {
         return new AnnotationView(annotation.getId(), annotation.getLetterId(),
-                annotation.getAuthorId(), authorNickname, annotation.getQuoteText(),
+                annotation.getAuthorId(), annotation.getParentAnnotationId(), authorNickname,
+                annotation.getQuoteText(),
                 annotation.getQuoteStart(), annotation.getQuoteEnd(), annotation.getContent(),
                 annotation.getTemplateType(), annotation.getCreatedAt());
     }

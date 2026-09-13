@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 public record AnnotationView(Long annotationId,
                              Long letterId,
                              Long authorId,
+                             Long parentAnnotationId,
                              String authorNickname,
                              String quoteText,
                              Integer quoteStart,

@@ -15,6 +15,7 @@ public class AnnotationEntity {
     private Long id;
     private Long letterId;
     private Long authorId;
+    private Long parentAnnotationId;
     private String quoteText;
     private Integer quoteStart;
     private Integer quoteEnd;
@@ -33,6 +34,8 @@ public class AnnotationEntity {
     public void setLetterId(Long letterId) { this.letterId = letterId; }
     public Long getAuthorId() { return authorId; }
     public void setAuthorId(Long authorId) { this.authorId = authorId; }
+    public Long getParentAnnotationId() { return parentAnnotationId; }
+    public void setParentAnnotationId(Long parentAnnotationId) { this.parentAnnotationId = parentAnnotationId; }
     public String getQuoteText() { return quoteText; }
     public void setQuoteText(String quoteText) { this.quoteText = quoteText; }
     public Integer getQuoteStart() { return quoteStart; }

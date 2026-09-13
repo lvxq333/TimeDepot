@@ -18,4 +18,8 @@ public interface AnnotationMapper extends BaseMapper<AnnotationEntity> {
     @Select("SELECT * FROM annotation WHERE letter_id = #{letterId} AND is_deleted = 0 "
             + "ORDER BY quote_start ASC, created_at ASC, id ASC")
     List<AnnotationEntity> selectByLetterId(@Param("letterId") Long letterId);
+
+    @Select("SELECT COUNT(*) FROM annotation WHERE parent_annotation_id = #{annotationId} "
+            + "AND is_deleted = 0")
+    long countActiveReplies(@Param("annotationId") Long annotationId);
 }
