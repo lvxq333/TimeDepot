@@ -1,8 +1,10 @@
 package com.couple.service.annotation.service.impl;
 
 import com.couple.common.exception.BadRequestException;
+import com.couple.common.exception.ConflictException;
 import com.couple.common.exception.ForbiddenException;
 import com.couple.service.annotation.dto.AnnotationCreateRequest;
+import com.couple.service.annotation.dto.AnnotationReplyRequest;
 import com.couple.service.annotation.entity.AnnotationEntity;
 import com.couple.service.annotation.mapper.AnnotationMapper;
 import com.couple.service.letter.entity.EmotionLetterEntity;
@@ -32,6 +34,7 @@ class AnnotationServiceImplTest {
     private AnnotationEntity insertedAnnotation;
     private int deleteCount;
     private int logCount;
+    private long activeReplyCount;
     private AnnotationServiceImpl service;
 
     @BeforeEach
@@ -45,6 +48,7 @@ class AnnotationServiceImplTest {
         insertedAnnotation = null;
         deleteCount = 0;
         logCount = 0;
+        activeReplyCount = 0;
 
         AnnotationMapper annotationMapper = proxy(AnnotationMapper.class, (proxy, method, args) -> {
             return switch (method.getName()) {
@@ -55,6 +59,7 @@ class AnnotationServiceImplTest {
                 }
                 case "selectByIdForUpdate" -> selectedAnnotation;
                 case "selectByLetterId" -> listedAnnotations;
+                case "countActiveReplies" -> activeReplyCount;
                 case "deleteById" -> {
                     deleteCount++;
                     yield 1;
@@ -127,6 +132,28 @@ class AnnotationServiceImplTest {
         assertEquals(20L, response.annotationId());
         assertEquals(1, deleteCount);
         assertEquals(1, logCount);
+    }
+
+    @Test
+    void replyInheritsRootQuoteAndCreatesSingleLevelThread() {
+        selectedAnnotation = annotation(20L, 2L, "你好", 0, 2);
+
+        var response = service.reply(1L, 20L, new AnnotationReplyRequest(" 我也想解释一下 "));
+
+        assertEquals(20L, response.parentAnnotationId());
+        assertEquals(20L, insertedAnnotation.getParentAnnotationId());
+        assertEquals("你好", insertedAnnotation.getQuoteText());
+        assertEquals("我也想解释一下", insertedAnnotation.getContent());
+        assertEquals(1, logCount);
+    }
+
+    @Test
+    void topLevelAnnotationWithRepliesCannotBeDeleted() {
+        selectedAnnotation = annotation(20L, 2L, "你好", 0, 2);
+        activeReplyCount = 1;
+
+        assertThrows(ConflictException.class, () -> service.delete(2L, 20L));
+        assertEquals(0, deleteCount);
     }
 
     private EmotionLetterEntity letter(String content, String status) {
