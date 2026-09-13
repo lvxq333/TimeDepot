@@ -8,18 +8,23 @@ import com.couple.service.memo.dto.MemoCreateRequest;
 import com.couple.service.memo.dto.MemoRevisionProposalRequest;
 import com.couple.service.memo.dto.MemoUpdateRequest;
 import com.couple.service.memo.dto.ReviewReturnRequest;
+import com.couple.service.memo.service.MemoEventService;
 import com.couple.service.memo.service.MemoService;
 import com.couple.service.memo.vo.CommitmentView;
 import com.couple.service.memo.vo.ConsensusMemoView;
+import com.couple.service.memo.vo.MemoEventDetailView;
+import com.couple.service.memo.vo.MemoEventPageResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** 线程级共识备忘录、双向确认和承诺版本接口。 */
@@ -27,9 +32,25 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/memo")
 public class MemoController {
     private final MemoService memoService;
+    private final MemoEventService memoEventService;
 
-    public MemoController(MemoService memoService) {
+    public MemoController(MemoService memoService, MemoEventService memoEventService) {
         this.memoService = memoService;
+        this.memoEventService = memoEventService;
+    }
+
+    /** 按最近回复时间分页展示当前用户参与的情绪事件。 */
+    @GetMapping("/events")
+    public ApiResponse<MemoEventPageResponse> listEvents(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.success(memoEventService.list(UserContext.requireUserId(), page, pageSize));
+    }
+
+    /** 查看事件内按时间正序排列的信件，以及当前可见的共识与承诺。 */
+    @GetMapping("/events/{threadId}")
+    public ApiResponse<MemoEventDetailView> eventDetail(@PathVariable String threadId) {
+        return ApiResponse.success(memoEventService.detail(UserContext.requireUserId(), threadId));
     }
 
     /** 为整条情绪信回复链创建一份备忘录草稿。 */
