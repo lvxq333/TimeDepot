@@ -1,0 +1,21 @@
+package com.couple.service.annotation.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.couple.service.annotation.entity.AnnotationEntity;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
+
+/** 批注数据访问入口，逻辑删除的数据不会出现在查询结果中。 */
+@Mapper
+public interface AnnotationMapper extends BaseMapper<AnnotationEntity> {
+
+    @Select("SELECT * FROM annotation WHERE id = #{annotationId} AND is_deleted = 0 FOR UPDATE")
+    AnnotationEntity selectByIdForUpdate(@Param("annotationId") Long annotationId);
+
+    @Select("SELECT * FROM annotation WHERE letter_id = #{letterId} AND is_deleted = 0 "
+            + "ORDER BY quote_start ASC, created_at ASC, id ASC")
+    List<AnnotationEntity> selectByLetterId(@Param("letterId") Long letterId);
+}
