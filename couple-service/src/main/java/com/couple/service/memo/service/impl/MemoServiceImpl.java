@@ -111,13 +111,21 @@ public class MemoServiceImpl implements MemoService {
 
     @Override
     @Transactional(readOnly = true)
-    public ConsensusMemoView getByLetter(Long userId, Long letterId) {
+    public ConsensusMemoView findByLetter(Long userId, Long letterId) {
         EmotionLetterEntity anchor = requireVisibleLetter(userId, letterId);
         ConsensusMemoEntity memo = memoMapper.selectByThreadId(anchor.getThreadId());
-        if (memo == null) throw new NotFoundException("这个情绪事件还没有共识备忘录");
+        if (memo == null) return null;
         requireParticipant(userId, memo);
         requireMemoVisible(userId, memo);
         return toView(userId, memo);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ConsensusMemoView getByLetter(Long userId, Long letterId) {
+        ConsensusMemoView memo = findByLetter(userId, letterId);
+        if (memo == null) throw new NotFoundException("这个情绪事件还没有共识备忘录");
+        return memo;
     }
 
     @Override

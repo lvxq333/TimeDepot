@@ -12,6 +12,8 @@ import com.couple.service.memo.vo.ConsensusMemoView;
 /** 线程级共识备忘录及双向确认承诺业务。 */
 public interface MemoService {
     ConsensusMemoView create(Long userId, MemoCreateRequest request);
+    /** 查询用户可见的备忘录；尚未创建时返回 null，供事件列表等可选场景使用。 */
+    ConsensusMemoView findByLetter(Long userId, Long letterId);
     ConsensusMemoView getByLetter(Long userId, Long letterId);
     ConsensusMemoView update(Long userId, Long memoId, MemoUpdateRequest request);
     ConsensusMemoView submit(Long userId, Long memoId);

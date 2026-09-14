@@ -92,11 +92,7 @@ public class MemoEventServiceImpl implements MemoEventService {
     }
 
     private ConsensusMemoView visibleMemo(Long userId, Long rootLetterId) {
-        try {
-            return memoService.getByLetter(userId, rootLetterId);
-        } catch (NotFoundException exception) {
-            return null;
-        }
+        return memoService.findByLetter(userId, rootLetterId);
     }
 
     private int pendingActionCount(Long userId, ConsensusMemoView memo) {
