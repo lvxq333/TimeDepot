@@ -164,7 +164,7 @@ public class MemoServiceImpl implements MemoService {
         memo.setUpdatedAt(now);
         updateMemoOrFail(memo);
         publish("MEMO_REVIEW_REQUIRED", otherParticipant(userId, memo), userId, memo,
-                Map.of("revisionId", revision.getId()));
+                Map.of("revisionId", revision.getId(), "threadId", memo.getThreadId()));
         return toView(userId, memo);
     }
 
@@ -220,7 +220,7 @@ public class MemoServiceImpl implements MemoService {
         memo.setUpdatedAt(now);
         updateMemoOrFail(memo);
         publish("MEMO_REVIEW_REQUIRED", otherParticipant(userId, memo), userId, memo,
-                Map.of("revisionId", revision.getId()));
+                Map.of("revisionId", revision.getId(), "threadId", memo.getThreadId()));
         return toView(userId, memo);
     }
 
@@ -260,7 +260,8 @@ public class MemoServiceImpl implements MemoService {
         memo.setResolutionRequestedBy(userId);
         memo.setUpdatedAt(LocalDateTime.now());
         updateMemoOrFail(memo);
-        publish("EVENT_RESOLUTION_REQUESTED", otherParticipant(userId, memo), userId, memo, Map.of());
+        publish("EVENT_RESOLUTION_REQUESTED", otherParticipant(userId, memo), userId, memo,
+                Map.of("threadId", memo.getThreadId()));
         return toView(userId, memo);
     }
 

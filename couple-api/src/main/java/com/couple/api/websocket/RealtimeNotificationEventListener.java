@@ -1,6 +1,7 @@
 package com.couple.api.websocket;
 
 import com.couple.service.notification.RealtimeNotificationEvent;
+import com.couple.service.notification.service.NotificationService;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -9,13 +10,17 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Component
 public class RealtimeNotificationEventListener {
     private final NotificationWebSocketHandler handler;
+    private final NotificationService notificationService;
 
-    public RealtimeNotificationEventListener(NotificationWebSocketHandler handler) {
+    public RealtimeNotificationEventListener(NotificationWebSocketHandler handler,
+                                             NotificationService notificationService) {
         this.handler = handler;
+        this.notificationService = notificationService;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onNotification(RealtimeNotificationEvent event) {
+        notificationService.record(event);
         handler.sendToUser(event.recipientId(), event);
     }
 }
