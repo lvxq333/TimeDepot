@@ -18,9 +18,12 @@ import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
 import com.couple.service.letter.vo.LetterSummaryView;
 import com.couple.service.letter.vo.LetterThreadView;
+import com.couple.service.notification.RealtimeNotificationEvent;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.UserMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +33,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -51,6 +55,8 @@ public class LetterServiceImpl implements LetterService {
     private final LetterLogMapper logMapper;
     private final UserMapper userMapper;
     private final long cooldownSeconds;
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     public LetterServiceImpl(EmotionLetterMapper letterMapper,
                              LetterLogMapper logMapper,
@@ -167,6 +173,8 @@ public class LetterServiceImpl implements LetterService {
         letter.setUpdatedAt(now);
         updateOrFail(letter);
         writeLog(letterId, userId, "SEND", "发送情绪信", now);
+        publish("LETTER_SENT", letter.getReceiverId(), userId, letter,
+                Map.of("title", letter.getTitle(), "threadId", letter.getThreadId()));
         return operation(letter, null, "信件已发送");
     }
 
@@ -235,6 +243,7 @@ public class LetterServiceImpl implements LetterService {
         letter.setUpdatedAt(now);
         updateOrFail(letter);
         writeLog(letterId, userId, "READ", "接收方首次打开信件", now);
+        publish("LETTER_READ", letter.getSenderId(), userId, letter, Map.of());
         return operation(letter, null, "信件已读");
     }
 
@@ -254,6 +263,7 @@ public class LetterServiceImpl implements LetterService {
         letter.setUpdatedAt(now);
         updateOrFail(letter);
         writeLog(letterId, userId, "RESOLVE", "接收方确认情绪问题已解决", now);
+        publish("LETTER_RESOLVED", letter.getSenderId(), userId, letter, Map.of());
 
         // TODO(LLM): 后期可温和建议发起线程解决申请，但必须由双方在备忘录流程中确认。
         return operation(letter, null, "已将这封信标记为已解决");
@@ -417,5 +427,13 @@ public class LetterServiceImpl implements LetterService {
 
     private String directionOf(Long userId, EmotionLetterEntity letter) {
         return Objects.equals(userId, letter.getSenderId()) ? "sent" : "inbox";
+    }
+
+    private void publish(String type, Long recipientId, Long actorId, EmotionLetterEntity letter,
+                         Map<String, Object> payload) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(RealtimeNotificationEvent.create(
+                    type, recipientId, actorId, "LETTER", letter.getId(), payload));
+        }
     }
 }

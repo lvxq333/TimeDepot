@@ -26,6 +26,9 @@ import com.couple.service.memo.vo.CommitmentRevisionView;
 import com.couple.service.memo.vo.CommitmentView;
 import com.couple.service.memo.vo.ConsensusMemoView;
 import com.couple.service.memo.vo.MemoRevisionView;
+import com.couple.service.notification.RealtimeNotificationEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -57,6 +61,8 @@ public class MemoServiceImpl implements MemoService {
     private final MemoCommitmentMapper commitmentMapper;
     private final MemoCommitmentRevisionMapper commitmentRevisionMapper;
     private final EmotionLetterMapper letterMapper;
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     public MemoServiceImpl(ConsensusMemoMapper memoMapper,
                            ConsensusMemoRevisionMapper memoRevisionMapper,
@@ -157,6 +163,8 @@ public class MemoServiceImpl implements MemoService {
         clearOtherParticipantConfirmation(memo, userId);
         memo.setUpdatedAt(now);
         updateMemoOrFail(memo);
+        publish("MEMO_REVIEW_REQUIRED", otherParticipant(userId, memo), userId, memo,
+                Map.of("revisionId", revision.getId()));
         return toView(userId, memo);
     }
 
@@ -211,6 +219,8 @@ public class MemoServiceImpl implements MemoService {
         setParticipantConfirmation(memo, userId, now);
         memo.setUpdatedAt(now);
         updateMemoOrFail(memo);
+        publish("MEMO_REVIEW_REQUIRED", otherParticipant(userId, memo), userId, memo,
+                Map.of("revisionId", revision.getId()));
         return toView(userId, memo);
     }
 
@@ -250,6 +260,7 @@ public class MemoServiceImpl implements MemoService {
         memo.setResolutionRequestedBy(userId);
         memo.setUpdatedAt(LocalDateTime.now());
         updateMemoOrFail(memo);
+        publish("EVENT_RESOLUTION_REQUESTED", otherParticipant(userId, memo), userId, memo, Map.of());
         return toView(userId, memo);
     }
 
@@ -349,6 +360,7 @@ public class MemoServiceImpl implements MemoService {
         commitment.setPendingRevisionId(revision.getId());
         commitment.setUpdatedAt(LocalDateTime.now());
         updateCommitmentOrFail(commitment);
+        publishCommitmentReview(userId, commitment, revision);
         return toCommitmentView(userId, commitment);
     }
 
@@ -373,6 +385,7 @@ public class MemoServiceImpl implements MemoService {
         commitment.setPendingRevisionId(revision.getId());
         commitment.setUpdatedAt(revision.getCreatedAt());
         updateCommitmentOrFail(commitment);
+        publishCommitmentReview(userId, commitment, revision);
         return toCommitmentView(userId, commitment);
     }
 
@@ -390,6 +403,7 @@ public class MemoServiceImpl implements MemoService {
         commitment.setPendingRevisionId(revision.getId());
         commitment.setUpdatedAt(revision.getCreatedAt());
         updateCommitmentOrFail(commitment);
+        publishCommitmentReview(userId, commitment, revision);
         return toCommitmentView(userId, commitment);
     }
 
@@ -752,6 +766,31 @@ public class MemoServiceImpl implements MemoService {
 
     private void insertOrFail(int rows, String message) {
         if (rows != 1) throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, message);
+    }
+
+    private Long otherParticipant(Long userId, ConsensusMemoEntity memo) {
+        return Objects.equals(userId, memo.getParticipantAId())
+                ? memo.getParticipantBId() : memo.getParticipantAId();
+    }
+
+    private void publish(String type, Long recipientId, Long actorId, ConsensusMemoEntity memo,
+                         Map<String, Object> payload) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(RealtimeNotificationEvent.create(
+                    type, recipientId, actorId, "MEMO", memo.getId(), payload));
+        }
+    }
+
+    private void publishCommitmentReview(Long userId, MemoCommitmentEntity commitment,
+                                         MemoCommitmentRevisionEntity revision) {
+        if (eventPublisher == null) return;
+        ConsensusMemoEntity memo = memoMapper.selectById(commitment.getMemoId());
+        if (memo == null) return;
+        eventPublisher.publishEvent(RealtimeNotificationEvent.create(
+                "COMMITMENT_REVIEW_REQUIRED", otherParticipant(userId, memo), userId,
+                "COMMITMENT", commitment.getId(),
+                Map.of("memoId", memo.getId(), "threadId", memo.getThreadId(),
+                        "revisionId", revision.getId())));
     }
 
     private record ReviewContext(MemoCommitmentEntity commitment,

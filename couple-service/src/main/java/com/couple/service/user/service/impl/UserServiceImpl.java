@@ -8,6 +8,7 @@ import com.couple.common.exception.UnauthorizedException;
 import com.couple.common.security.JwtTokenUtil;
 import com.couple.common.security.CurrentUser;
 import com.couple.service.auth.service.AuthSessionService;
+import com.couple.service.notification.RealtimeNotificationEvent;
 import com.couple.service.user.dto.PartnerRemarkUpdateRequest;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
@@ -32,6 +33,8 @@ import com.couple.service.user.vo.UserProfileResponse;
 import com.couple.service.user.vo.UserProfileUpdateResponse;
 import com.couple.service.user.vo.UserRegisterResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -43,6 +46,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /** 用户业务实现，负责账户认证、资料维护和伴侣关系绑定。 */
@@ -68,6 +72,8 @@ public class UserServiceImpl implements UserService {
     private final AuthSessionService authSessionService;
     private final String jwtSecret;
     private final long jwtExpireSeconds;
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     public UserServiceImpl(UserMapper userMapper,
                            CoupleBindRequestMapper bindRequestMapper,
@@ -184,7 +190,10 @@ public class UserServiceImpl implements UserService {
         } catch (DuplicateKeyException exception) {
             throw new ConflictException("你已有待处理申请，或双方之间已有待处理申请");
         }
-        return toBindRequestView(bindRequest, current, target);
+        CoupleBindRequestView view = toBindRequestView(bindRequest, current, target);
+        publish("BIND_REQUEST_CREATED", target.getId(), userId, "BIND_REQUEST", bindRequest.getId(),
+                Map.of("requesterNickname", current.getNickname()));
+        return view;
     }
 
     /** 查询当前用户收到的绑定申请，待处理申请优先。 */
@@ -234,6 +243,8 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "绑定失败，请稍后重试");
         }
         bindRequestMapper.cancelOtherPending(requestId, firstId, secondId, boundAt);
+        publish("BIND_REQUEST_ACCEPTED", requesterId, userId, "BIND_REQUEST", requestId,
+                Map.of("partnerNickname", receiver.getNickname()));
         return new UserBindResponse(
                 "绑定申请已同意", requesterId, requester.getNickname(), requester.getNickname(), boundAt);
     }
@@ -251,7 +262,10 @@ public class UserServiceImpl implements UserService {
         bindRequest.setActivePairKey(null);
         bindRequest.setActiveRequesterId(null);
         bindRequest.setProcessedAt(processedAt);
-        return toBindRequestView(bindRequest);
+        CoupleBindRequestView view = toBindRequestView(bindRequest);
+        publish("BIND_REQUEST_REJECTED", bindRequest.getRequesterId(), userId,
+                "BIND_REQUEST", requestId, Map.of());
+        return view;
     }
 
     /** 查询当前用户、伴侣展示信息和默认权益。 */
@@ -401,5 +415,13 @@ public class UserServiceImpl implements UserService {
             code.append(CODE_ALPHABET.charAt(RANDOM.nextInt(CODE_ALPHABET.length())));
         }
         return code.toString();
+    }
+
+    private void publish(String type, Long recipientId, Long actorId, String aggregateType,
+                         Object aggregateId, Map<String, Object> payload) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(RealtimeNotificationEvent.create(
+                    type, recipientId, actorId, aggregateType, aggregateId, payload));
+        }
     }
 }

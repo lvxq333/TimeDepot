@@ -17,8 +17,11 @@ import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.entity.LetterLogEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
 import com.couple.service.letter.mapper.LetterLogMapper;
+import com.couple.service.notification.RealtimeNotificationEvent;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.UserMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +42,8 @@ public class AnnotationServiceImpl implements AnnotationService {
     private final EmotionLetterMapper letterMapper;
     private final LetterLogMapper logMapper;
     private final UserMapper userMapper;
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     public AnnotationServiceImpl(AnnotationMapper annotationMapper,
                                  EmotionLetterMapper letterMapper,
@@ -72,7 +77,11 @@ public class AnnotationServiceImpl implements AnnotationService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "批注保存失败，请稍后重试");
         }
         writeLog(letter.getId(), userId, "ANNOTATE", "添加原文批注", now);
-        return toView(annotation, requireAuthor(userId).getNickname());
+        String nickname = requireAuthor(userId).getNickname();
+        publish("ANNOTATION_CREATED", otherParticipant(userId, letter), userId, annotation,
+                Map.of("authorNickname", nickname, "quoteText", annotation.getQuoteText(),
+                        "letterId", letter.getId()));
+        return toView(annotation, nickname);
     }
 
     @Override
@@ -101,7 +110,13 @@ public class AnnotationServiceImpl implements AnnotationService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "回复保存失败，请稍后重试");
         }
         writeLog(letter.getId(), userId, "REPLY_ANNOTATION", "回复原文批注", now);
-        return toView(reply, requireAuthor(userId).getNickname());
+        String nickname = requireAuthor(userId).getNickname();
+        Long recipientId = Objects.equals(userId, target.getAuthorId())
+                ? otherParticipant(userId, letter) : target.getAuthorId();
+        publish("ANNOTATION_REPLIED", recipientId, userId, reply,
+                Map.of("authorNickname", nickname, "rootAnnotationId", root.getId(),
+                        "letterId", letter.getId()));
+        return toView(reply, nickname);
     }
 
     @Override
@@ -190,6 +205,18 @@ public class AnnotationServiceImpl implements AnnotationService {
         log.setCreatedAt(now);
         if (logMapper.insert(log) != 1) {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "批注操作记录失败");
+        }
+    }
+
+    private Long otherParticipant(Long userId, EmotionLetterEntity letter) {
+        return Objects.equals(userId, letter.getSenderId()) ? letter.getReceiverId() : letter.getSenderId();
+    }
+
+    private void publish(String type, Long recipientId, Long actorId, AnnotationEntity annotation,
+                         Map<String, Object> payload) {
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(RealtimeNotificationEvent.create(
+                    type, recipientId, actorId, "ANNOTATION", annotation.getId(), payload));
         }
     }
 }
