@@ -1,6 +1,5 @@
 package com.couple.service.memo.service.impl;
 
-import com.couple.common.exception.NotFoundException;
 import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
 import com.couple.service.letter.service.LetterService;
@@ -65,7 +64,7 @@ class MemoEventServiceImplTest {
                         ? new LetterThreadView("thread-a", "事件 A", timeline)
                         : defaultValue(method.getReturnType()));
         MemoService memoService = proxy(MemoService.class, (proxy, method, args) -> {
-            if ("getByLetter".equals(method.getName())) throw new NotFoundException("暂无备忘录");
+            if ("getByLetter".equals(method.getName())) throw new AssertionError("可选查询不应调用抛异常接口");
             return defaultValue(method.getReturnType());
         });
         return new MemoEventServiceImpl(mapper, letterService, memoService);
