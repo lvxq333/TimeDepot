@@ -28,7 +28,8 @@ docker compose down
 
 - 前端 Nginx 是唯一浏览器入口，默认映射到宿主机 `8088`。
 - `/api/*`、`/ws/notification` 和 `/ws/typing` 由 Nginx 转发到后端。
-- MySQL 和 Redis 只在 Compose 内部网络开放，不映射宿主机端口。
+- Redis 只在 Compose 内部网络开放，不映射宿主机端口。
+- MySQL 同时仅绑定到宿主机 `127.0.0.1:3307`，供 IntelliJ Database 等本地工具访问；可通过 `MYSQL_PORT` 修改。
 - 后端健康检查为 `/actuator/health`；前端健康检查为 `/health`。
 
 可以通过 `APP_PORT` 修改入口端口，通过 `LETTER_COOLDOWN_SECONDS` 修改联调冷静期。
