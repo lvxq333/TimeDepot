@@ -51,7 +51,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-couple-local-jwt-secret-change-me-2026}
       MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info
-      LETTER_COOLDOWN_SECONDS: ${LETTER_COOLDOWN_SECONDS:-180}
+      # 本地测试默认 3 秒；上线前通过环境变量设置正式冷静期。
+      LETTER_COOLDOWN_SECONDS: ${LETTER_COOLDOWN_SECONDS:-3}
       TZ: Asia/Shanghai
     depends_on:
       mysql:
