@@ -33,3 +33,5 @@ docker compose down
 - 后端健康检查为 `/actuator/health`；前端健康检查为 `/health`。
 
 可以通过 `APP_PORT` 修改入口端口，通过 `LETTER_COOLDOWN_SECONDS` 修改联调冷静期。
+
+部署到正式域名时，需将 `WS_ALLOWED_ORIGIN_PATTERNS` 设置为浏览器访问的 HTTPS 来源（例如 `https://example.com`）。本地默认值仅允许 localhost 和 127.0.0.1。

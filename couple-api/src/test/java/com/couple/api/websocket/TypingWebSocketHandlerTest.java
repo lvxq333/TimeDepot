@@ -1,6 +1,7 @@
 package com.couple.api.websocket;
 
 import com.couple.common.security.CurrentUser;
+import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
 import com.couple.service.user.entity.UserEntity;
@@ -14,11 +15,12 @@ import org.springframework.web.socket.WebSocketSession;
 
 import java.lang.reflect.Proxy;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -29,13 +31,16 @@ class TypingWebSocketHandlerTest {
     @Test
     void forwardsTypingOnlyToOtherParticipantAndStopsOnDisconnect() throws Exception {
         EmotionLetterEntity letter = letter(11L, 1L, 2L, "READ");
-        UserEntity alice = new UserEntity();
+        UserEntity alice = user(1L, 2L);
         alice.setNickname("爱丽丝");
+        UserEntity bob = user(2L, 1L);
         EmotionLetterMapper letterMapper = mapper(EmotionLetterMapper.class,
-                invocation -> "selectById".equals(invocation.getName()) ? letter : defaultValue(invocation.getReturnType()));
+                (method, args) -> "selectById".equals(method.getName()) ? letter : defaultValue(method.getReturnType()));
         UserMapper userMapper = mapper(UserMapper.class,
-                invocation -> "selectById".equals(invocation.getName()) ? alice : defaultValue(invocation.getReturnType()));
-        TypingWebSocketHandler handler = new TypingWebSocketHandler(objectMapper, letterMapper, userMapper);
+                (method, args) -> "selectById".equals(method.getName())
+                        ? (Long.valueOf(1L).equals(args[0]) ? alice : bob)
+                        : defaultValue(method.getReturnType()));
+        TypingWebSocketHandler handler = new TypingWebSocketHandler(objectMapper, letterMapper, userMapper, sessions());
         List<String> senderMessages = new ArrayList<>();
         List<String> recipientMessages = new ArrayList<>();
         WebSocketSession sender = session("sender", 1L, senderMessages);
@@ -64,9 +69,9 @@ class TypingWebSocketHandlerTest {
     void rejectsUnknownOrPrivateLetterWithoutBroadcasting() throws Exception {
         EmotionLetterEntity privateLetter = letter(12L, 7L, 8L, "DRAFT");
         EmotionLetterMapper letterMapper = mapper(EmotionLetterMapper.class,
-                invocation -> "selectById".equals(invocation.getName()) ? privateLetter : defaultValue(invocation.getReturnType()));
-        UserMapper userMapper = mapper(UserMapper.class, invocation -> defaultValue(invocation.getReturnType()));
-        TypingWebSocketHandler handler = new TypingWebSocketHandler(objectMapper, letterMapper, userMapper);
+                (method, args) -> "selectById".equals(method.getName()) ? privateLetter : defaultValue(method.getReturnType()));
+        UserMapper userMapper = mapper(UserMapper.class, (method, args) -> defaultValue(method.getReturnType()));
+        TypingWebSocketHandler handler = new TypingWebSocketHandler(objectMapper, letterMapper, userMapper, sessions());
         List<String> senderMessages = new ArrayList<>();
         List<String> recipientMessages = new ArrayList<>();
         WebSocketSession sender = session("sender", 7L, senderMessages);
@@ -81,6 +86,50 @@ class TypingWebSocketHandlerTest {
         assertEquals("ERROR", error.get("type").asText());
         assertEquals(400, error.get("code").asInt());
         assertEquals(1, recipientMessages.size());
+    }
+
+    @Test
+    void rejectsTypingOnHistoryAfterPartnerChanges() throws Exception {
+        EmotionLetterEntity letter = letter(13L, 1L, 2L, "READ");
+        UserEntity alice = user(1L, 3L);
+        UserEntity bob = user(2L, null);
+        EmotionLetterMapper letterMapper = mapper(EmotionLetterMapper.class,
+                (method, args) -> "selectById".equals(method.getName()) ? letter : defaultValue(method.getReturnType()));
+        UserMapper userMapper = mapper(UserMapper.class,
+                (method, args) -> "selectById".equals(method.getName())
+                        ? (Long.valueOf(1L).equals(args[0]) ? alice : bob)
+                        : defaultValue(method.getReturnType()));
+        TypingWebSocketHandler handler = new TypingWebSocketHandler(objectMapper, letterMapper, userMapper, sessions());
+        List<String> senderMessages = new ArrayList<>();
+        List<String> recipientMessages = new ArrayList<>();
+        WebSocketSession sender = session("sender", 1L, senderMessages);
+        WebSocketSession recipient = session("recipient", 2L, recipientMessages);
+        handler.afterConnectionEstablished(sender);
+        handler.afterConnectionEstablished(recipient);
+
+        handler.handleTextMessage(sender,
+                new org.springframework.web.socket.TextMessage("{\"type\":\"typing\",\"letterId\":13,\"typing\":true}"));
+
+        assertEquals("ERROR", objectMapper.readTree(senderMessages.get(1)).get("type").asText());
+        assertEquals(1, recipientMessages.size());
+    }
+
+    private UserEntity user(Long id, Long partnerId) {
+        UserEntity user = new UserEntity();
+        user.setId(id);
+        user.setPartnerId(partnerId);
+        user.setRelationshipStatus(partnerId == null ? "UNBOUND_HISTORY" : "BOUND");
+        return user;
+    }
+
+    /** 测试信件路由时使用始终有效的登录会话。 */
+    private AuthSessionService sessions() {
+        return new AuthSessionService() {
+            public String createSession(Long userId, String username, Duration ttl) { return null; }
+            public void requireActiveSession(CurrentUser user) { }
+            public void revokeCurrentSession(CurrentUser user) { }
+            public void revokeAllSessions(Long userId) { }
+        };
     }
 
     private EmotionLetterEntity letter(Long id, Long senderId, Long receiverId, String status) {
@@ -110,9 +159,9 @@ class TypingWebSocketHandlerTest {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T mapper(Class<T> type, Function<java.lang.reflect.Method, Object> invocation) {
+    private <T> T mapper(Class<T> type, BiFunction<java.lang.reflect.Method, Object[], Object> invocation) {
         return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type},
-                (proxy, method, args) -> invocation.apply(method));
+                (proxy, method, args) -> invocation.apply(method, args));
     }
 
     private static Object defaultValue(Class<?> type) {

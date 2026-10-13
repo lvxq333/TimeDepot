@@ -7,6 +7,7 @@ import com.couple.service.user.dto.UserLoginRequest;
 import com.couple.service.user.dto.UserProfileUpdateRequest;
 import com.couple.service.user.dto.UserRegisterRequest;
 import com.couple.service.user.dto.UserUnbindRequest;
+import com.couple.service.user.vo.UserUnbindResponse;
 import com.couple.service.user.vo.EntitlementsResponse;
 import com.couple.service.user.vo.CoupleBindRequestView;
 import com.couple.service.user.vo.PartnerRemarkResponse;
@@ -45,5 +46,5 @@ public interface UserService {
 
     EntitlementsResponse getEntitlements(Long userId);
 
-    void unbind(Long userId, UserUnbindRequest request);
+    UserUnbindResponse unbind(Long userId, UserUnbindRequest request);
 }

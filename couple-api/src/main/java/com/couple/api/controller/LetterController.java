@@ -9,6 +9,7 @@ import com.couple.service.letter.vo.LetterDetailView;
 import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
 import com.couple.service.letter.vo.LetterThreadView;
+import com.couple.service.letter.vo.LetterThreadPageResponse;
 import com.couple.service.memo.service.MemoService;
 import com.couple.service.memo.vo.ConsensusMemoView;
 import jakarta.validation.Valid;
@@ -23,6 +24,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.LocalDate;
 
 /** 情绪信草稿、发送、查询、已读和解决接口。 */
 @RestController
@@ -81,6 +85,21 @@ public class LetterController {
             @RequestParam(required = false) String emotionTag) {
         return ApiResponse.success(letterService.list(UserContext.requireUserId(), page, pageSize,
                 status, direction, emotionTag));
+    }
+
+    /** 按事件分页返回信箱摘要，不加载其他事件的信件正文。 */
+    @GetMapping("/threads")
+    public ApiResponse<LetterThreadPageResponse> threads(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) String emotionTag,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ApiResponse.success(letterService.listThreads(UserContext.requireUserId(), page, pageSize,
+                status, direction, emotionTag, keyword, startDate, endDate));
     }
 
     /** 查看信件详情；接收方只能查看已经发送给自己的信件。 */

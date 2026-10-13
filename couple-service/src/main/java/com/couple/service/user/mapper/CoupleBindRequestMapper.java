@@ -46,4 +46,12 @@ public interface CoupleBindRequestMapper extends BaseMapper<CoupleBindRequestEnt
                            @Param("firstUserId") Long firstUserId,
                            @Param("secondUserId") Long secondUserId,
                            @Param("processedAt") LocalDateTime processedAt);
+
+    @Update("UPDATE couple_bind_request SET status = 'CANCELLED', active_pair_key = NULL, "
+            + "active_requester_id = NULL, processed_at = #{processedAt}, updated_at = #{processedAt} "
+            + "WHERE status = 'PENDING' AND (requester_id IN (#{firstUserId}, #{secondUserId}) "
+            + "OR receiver_id IN (#{firstUserId}, #{secondUserId}))")
+    int cancelPendingForPair(@Param("firstUserId") Long firstUserId,
+                             @Param("secondUserId") Long secondUserId,
+                             @Param("processedAt") LocalDateTime processedAt);
 }

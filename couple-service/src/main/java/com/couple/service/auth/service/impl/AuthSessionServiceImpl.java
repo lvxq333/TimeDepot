@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -130,6 +131,15 @@ public class AuthSessionServiceImpl implements AuthSessionService {
                     missingKey(currentUser.sessionId())));
         } catch (DataAccessException exception) {
             log.warn("撤销标记已生效，但清理会话缓存失败: sessionId={}", currentUser.sessionId());
+        }
+    }
+
+    @Override
+    @Transactional
+    public void revokeAllSessions(Long userId) {
+        for (AuthSessionEntity session : sessionMapper.selectActiveByUserId(userId)) {
+            revokeCurrentSession(new CurrentUser(userId, session.getUsername(),
+                    session.getSessionId(), Instant.now().plusSeconds(3600)));
         }
     }
 

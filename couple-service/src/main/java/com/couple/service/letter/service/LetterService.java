@@ -6,6 +6,9 @@ import com.couple.service.letter.vo.LetterDetailView;
 import com.couple.service.letter.vo.LetterOperationResponse;
 import com.couple.service.letter.vo.LetterPageResponse;
 import com.couple.service.letter.vo.LetterThreadView;
+import com.couple.service.letter.vo.LetterThreadPageResponse;
+
+import java.time.LocalDate;
 
 /** 情绪信核心业务，包括草稿、冷静期、发送、已读和解决状态流转。 */
 public interface LetterService {
@@ -16,6 +19,9 @@ public interface LetterService {
     LetterOperationResponse send(Long userId, Long letterId);
     LetterPageResponse list(Long userId, int page, int pageSize, String status,
                             String direction, String emotionTag);
+    LetterThreadPageResponse listThreads(Long userId, int page, int pageSize, String status,
+                                         String direction, String emotionTag, String keyword,
+                                         LocalDate startDate, LocalDate endDate);
     LetterDetailView detail(Long userId, Long letterId);
     LetterThreadView thread(Long userId, Long letterId);
     LetterOperationResponse read(Long userId, Long letterId);

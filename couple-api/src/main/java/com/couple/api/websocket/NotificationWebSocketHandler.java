@@ -1,6 +1,8 @@
 package com.couple.api.websocket;
 
 import com.couple.common.security.CurrentUser;
+import com.couple.common.exception.UnauthorizedException;
+import com.couple.service.auth.service.AuthSessionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -18,12 +20,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public class NotificationWebSocketHandler extends TextWebSocketHandler {
 
     private final ObjectMapper objectMapper;
+    private final AuthSessionService authSessionService;
     private final ConcurrentHashMap<Long, Set<WebSocketSession>> userSessions = new ConcurrentHashMap<>();
 
-    public NotificationWebSocketHandler(ObjectMapper objectMapper) {
+    /** 注入会话服务，用于连接建立后的持续校验。 */
+    public NotificationWebSocketHandler(ObjectMapper objectMapper, AuthSessionService authSessionService) {
         this.objectMapper = objectMapper;
+        this.authSessionService = authSessionService;
     }
 
+    /** 保存新连接，并发送连接确认。 */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         CurrentUser currentUser = currentUser(session);
@@ -32,8 +38,10 @@ public class NotificationWebSocketHandler extends TextWebSocketHandler {
         session.sendMessage(new TextMessage("{\"type\":\"CONNECTED\"}"));
     }
 
+    /** 每次心跳先复查会话，退出登录后的连接不再响应。 */
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+        if (!requireActive(session)) return;
         if ("PING".equalsIgnoreCase(message.getPayload())) {
             session.sendMessage(new TextMessage("{\"type\":\"PONG\"}"));
         }
@@ -71,11 +79,13 @@ public class NotificationWebSocketHandler extends TextWebSocketHandler {
         return sessions == null ? 0 : sessions.size();
     }
 
+    /** 推送前再次核对会话，防止已撤销连接收到新的通知。 */
     private void send(WebSocketSession session, TextMessage message) {
         if (!session.isOpen()) {
             remove(session);
             return;
         }
+        if (!requireActive(session)) return;
         try {
             synchronized (session) {
                 session.sendMessage(message);
@@ -87,6 +97,22 @@ public class NotificationWebSocketHandler extends TextWebSocketHandler {
             } catch (IOException ignored) {
                 // 连接已经不可用，无需再次处理。
             }
+        }
+    }
+
+    /** 已建立的连接也持续检查登录会话；退出后在下次心跳或推送时关闭。 */
+    private boolean requireActive(WebSocketSession session) {
+        try {
+            authSessionService.requireActiveSession(currentUser(session));
+            return true;
+        } catch (UnauthorizedException exception) {
+            remove(session);
+            try {
+                session.close(CloseStatus.POLICY_VIOLATION);
+            } catch (IOException ignored) {
+                // 连接已经断开，无需再次关闭。
+            }
+            return false;
         }
     }
 

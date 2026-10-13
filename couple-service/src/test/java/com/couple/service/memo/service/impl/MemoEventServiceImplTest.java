@@ -12,6 +12,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -61,7 +62,7 @@ class MemoEventServiceImplTest {
                 });
         LetterService letterService = proxy(LetterService.class, (proxy, method, args) ->
                 "thread".equals(method.getName())
-                        ? new LetterThreadView("thread-a", "事件 A", timeline)
+                        ? new LetterThreadView("thread-a", "事件 A", "OPEN", timeline, Map.of())
                         : defaultValue(method.getReturnType()));
         MemoService memoService = proxy(MemoService.class, (proxy, method, args) -> {
             if ("getByLetter".equals(method.getName())) throw new AssertionError("可选查询不应调用抛异常接口");
@@ -86,7 +87,7 @@ class MemoEventServiceImplTest {
     private static LetterDetailView view(Long id, String status, LocalDateTime createdAt) {
         return new LetterDetailView(id, "标题", "正文", "sad", 5, status,
                 1L, "甲", 2L, "乙", "thread-a", null, "sent",
-                "READ".equals(status), null, createdAt, createdAt, null, null, List.of(), null);
+                "READ".equals(status), null, createdAt, createdAt, null, null, List.of(), null, true);
     }
 
     @SuppressWarnings("unchecked")

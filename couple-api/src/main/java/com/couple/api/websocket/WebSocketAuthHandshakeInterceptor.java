@@ -1,9 +1,6 @@
 package com.couple.api.websocket;
 
-import com.couple.api.config.JwtProperties;
 import com.couple.common.security.CurrentUser;
-import com.couple.common.security.JwtTokenUtil;
-import com.couple.service.auth.service.AuthSessionService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -21,28 +18,21 @@ public class WebSocketAuthHandshakeInterceptor implements HandshakeInterceptor {
 
     public static final String CURRENT_USER_ATTRIBUTE = "currentUser";
 
-    private final JwtProperties jwtProperties;
-    private final AuthSessionService authSessionService;
+    private final WebSocketTicketService ticketService;
 
-    public WebSocketAuthHandshakeInterceptor(JwtProperties jwtProperties,
-                                             AuthSessionService authSessionService) {
-        this.jwtProperties = jwtProperties;
-        this.authSessionService = authSessionService;
+    /** 握手认证只接受短时票据，不再解析 URL 中的 JWT。 */
+    public WebSocketAuthHandshakeInterceptor(WebSocketTicketService ticketService) {
+        this.ticketService = ticketService;
     }
 
+    /** 消费一次性票据并把认证身份交给后续 WebSocket 处理器。 */
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) {
         try {
             MultiValueMap<String, String> query = UriComponentsBuilder.fromUri(request.getURI())
                     .build().getQueryParams();
-            String token = query.getFirst("token");
-            if (token == null || token.isBlank()) {
-                response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                return false;
-            }
-            CurrentUser currentUser = JwtTokenUtil.parse(jwtProperties.getSecret(), token);
-            authSessionService.requireActiveSession(currentUser);
+            CurrentUser currentUser = ticketService.consume(query.getFirst("ticket"));
             attributes.put(CURRENT_USER_ATTRIBUTE, currentUser);
             return true;
         } catch (RuntimeException exception) {
@@ -51,6 +41,7 @@ public class WebSocketAuthHandshakeInterceptor implements HandshakeInterceptor {
         }
     }
 
+    /** 握手完成后无需额外清理，票据已在握手前原子消费。 */
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                WebSocketHandler wsHandler, Exception exception) {

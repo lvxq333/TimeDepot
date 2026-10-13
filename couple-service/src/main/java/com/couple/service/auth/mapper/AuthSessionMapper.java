@@ -8,10 +8,15 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /** 登录会话的数据访问入口。 */
 @Mapper
 public interface AuthSessionMapper extends BaseMapper<AuthSessionEntity> {
+
+    @Select("SELECT * FROM auth_session WHERE user_id = #{userId} AND status = 'ACTIVE' "
+            + "AND expires_at > NOW()")
+    List<AuthSessionEntity> selectActiveByUserId(@Param("userId") Long userId);
 
     @Select("SELECT * FROM auth_session WHERE session_id = #{sessionId} LIMIT 1")
     AuthSessionEntity selectBySessionId(@Param("sessionId") String sessionId);

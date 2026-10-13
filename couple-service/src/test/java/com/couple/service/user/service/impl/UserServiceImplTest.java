@@ -8,10 +8,13 @@ import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
 import com.couple.service.user.dto.UserRegisterRequest;
+import com.couple.service.user.dto.RecoveryQuestionRequest;
+import com.couple.service.user.dto.UserUnbindRequest;
 import com.couple.service.user.entity.CoupleBindRequestEntity;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.CoupleBindRequestMapper;
 import com.couple.service.user.mapper.UserMapper;
+import com.couple.service.user.mapper.RecoveryQuestionMapper;
 import com.couple.service.user.vo.CoupleBindRequestView;
 import com.couple.service.user.vo.UserBindResponse;
 import com.couple.service.user.vo.UserRegisterResponse;
@@ -30,6 +33,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** 用户核心业务的单元测试，不依赖 Spring 容器、数据库或动态代理库。 */
 class UserServiceImplTest {
@@ -49,6 +54,9 @@ class UserServiceImplTest {
         CoupleBindRequestMapper bindRequestMapper = (CoupleBindRequestMapper) Proxy.newProxyInstance(
                 CoupleBindRequestMapper.class.getClassLoader(),
                 new Class<?>[]{CoupleBindRequestMapper.class}, bindRequestMapperStub);
+        RecoveryQuestionMapper recoveryQuestionMapper = (RecoveryQuestionMapper) Proxy.newProxyInstance(
+                RecoveryQuestionMapper.class.getClassLoader(), new Class<?>[]{RecoveryQuestionMapper.class},
+                (proxy, method, args) -> "insert".equals(method.getName()) ? 1 : null);
         PasswordEncoder encoder = new PasswordEncoder() {
             @Override
             public String encode(CharSequence rawPassword) {
@@ -73,15 +81,20 @@ class UserServiceImplTest {
             @Override
             public void revokeCurrentSession(CurrentUser currentUser) {
             }
+
+            @Override
+            public void revokeAllSessions(Long userId) {
+            }
         };
         userService = new UserServiceImpl(
-                mapper, bindRequestMapper, encoder, authSessionService, JWT_SECRET, 86400);
+                mapper, bindRequestMapper, recoveryQuestionMapper, encoder, authSessionService, JWT_SECRET, 86400);
     }
 
     @Test
     void registerHashesPasswordAndUsesUsernameAsDefaultNickname() {
         UserRegisterResponse response = userService.register(
-                new UserRegisterRequest("alice", "abc123456", null));
+                new UserRegisterRequest("alice", "abc123456", null,
+                        List.of(new RecoveryQuestionRequest("只有我知道的提示", "private-answer-2026"))));
 
         assertEquals(1L, response.userId());
         assertEquals("alice", response.nickname());
@@ -94,7 +107,8 @@ class UserServiceImplTest {
         mapperStub.usersByUsername.put("alice", user(1L, "alice"));
 
         assertThrows(ConflictException.class, () -> userService.register(
-                new UserRegisterRequest("alice", "abc123456", "Alice")));
+                new UserRegisterRequest("alice", "abc123456", "Alice",
+                        List.of(new RecoveryQuestionRequest("只有我知道的提示", "private-answer-2026")))));
     }
 
     @Test
@@ -165,6 +179,48 @@ class UserServiceImplTest {
         assertEquals("ACCEPTED", bindRequestMapperStub.lastDecision);
     }
 
+    @Test
+    void unbindClearsBothSidesAndIssuesDifferentCodes() {
+        UserEntity alice = user(1L, "alice");
+        UserEntity bob = user(2L, "bob");
+        alice.setPartnerId(2L);
+        bob.setPartnerId(1L);
+        alice.setRelationshipStatus("BOUND");
+        bob.setRelationshipStatus("BOUND");
+        mapperStub.usersById.put(1L, alice);
+        mapperStub.usersById.put(2L, bob);
+        mapperStub.lockedPair = List.of(alice, bob);
+
+        var response = userService.unbind(1L, new UserUnbindRequest(true, "双方协商"));
+
+        assertEquals("解绑成功", response.message());
+        assertNotNull(response.unboundAt());
+        assertEquals(alice.getCoupleCode(), response.newCoupleCode());
+        assertEquals(6, alice.getCoupleCode().length());
+        assertEquals(6, bob.getCoupleCode().length());
+        assertEquals(false, alice.getCoupleCode().equals(bob.getCoupleCode()));
+        assertNull(alice.getPartnerId());
+        assertNull(bob.getPartnerId());
+        assertEquals("UNBOUND_HISTORY", alice.getRelationshipStatus());
+        assertEquals("UNBOUND_HISTORY", bob.getRelationshipStatus());
+        assertEquals(1, bindRequestMapperStub.cancelPendingCount);
+    }
+
+    @Test
+    void unbindRejectsNonReciprocalRelationship() {
+        UserEntity alice = user(1L, "alice");
+        UserEntity bob = user(2L, "bob");
+        alice.setPartnerId(2L);
+        alice.setRelationshipStatus("BOUND");
+        mapperStub.usersById.put(1L, alice);
+        mapperStub.usersById.put(2L, bob);
+        mapperStub.lockedPair = List.of(alice, bob);
+
+        assertThrows(ConflictException.class,
+                () -> userService.unbind(1L, new UserUnbindRequest(true, "")));
+        assertEquals(0, mapperStub.unbindingUpdateCount);
+    }
+
     private UserEntity user(Long id, String username) {
         UserEntity user = new UserEntity();
         user.setId(id);
@@ -186,6 +242,7 @@ class UserServiceImplTest {
         private List<UserEntity> lockedPair = List.of();
         private UserEntity inserted;
         private int bindingUpdateCount;
+        private int unbindingUpdateCount;
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
@@ -197,6 +254,16 @@ class UserServiceImplTest {
                 case "insert" -> insert((UserEntity) args[0]);
                 case "updateBinding" -> {
                     bindingUpdateCount++;
+                    yield 1;
+                }
+                case "updateUnbinding" -> {
+                    UserEntity user = usersById.get((Long) args[0]);
+                    user.setPartnerId(null);
+                    user.setPartnerRemark(null);
+                    user.setRelationshipStatus("UNBOUND_HISTORY");
+                    user.setUnboundAt((LocalDateTime) args[3]);
+                    user.setCoupleCode((String) args[2]);
+                    unbindingUpdateCount++;
                     yield 1;
                 }
                 case "updateNickname", "updatePartnerRemark" -> 1;
@@ -235,6 +302,7 @@ class UserServiceImplTest {
         private final Map<Long, CoupleBindRequestEntity> requestsById = new HashMap<>();
         private long nextId = 1L;
         private String lastDecision;
+        private int cancelPendingCount;
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
@@ -244,6 +312,7 @@ class UserServiceImplTest {
                 case "selectReceived", "selectSent" -> List.of();
                 case "updateDecision" -> updateDecision((Long) args[0], (Long) args[1], (String) args[2]);
                 case "cancelOtherPending" -> 0;
+                case "cancelPendingForPair" -> { cancelPendingCount++; yield 0; }
                 case "toString" -> "StubBindRequestMapper";
                 case "hashCode" -> System.identityHashCode(proxy);
                 case "equals" -> proxy == args[0];

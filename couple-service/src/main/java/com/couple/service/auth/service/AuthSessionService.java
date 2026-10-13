@@ -12,4 +12,6 @@ public interface AuthSessionService {
     void requireActiveSession(CurrentUser currentUser);
 
     void revokeCurrentSession(CurrentUser currentUser);
+
+    void revokeAllSessions(Long userId);
 }

@@ -79,10 +79,18 @@ class AnnotationServiceImplTest {
             }
             return defaultValue(method.getReturnType());
         });
-        UserMapper userMapper = proxy(UserMapper.class, (proxy, method, args) ->
-                "selectById".equals(method.getName())
-                        ? users.get((Long) args[0]) : defaultValue(method.getReturnType()));
-        service = new AnnotationServiceImpl(annotationMapper, letterMapper, logMapper, userMapper);
+        UserMapper userMapper = proxy(UserMapper.class, (proxy, method, args) -> {
+            if ("selectById".equals(method.getName()) || "selectIncludingDeletedById".equals(method.getName()))
+                return users.get((Long) args[0]);
+            if ("selectPairForUpdate".equals(method.getName()))
+                return List.of(users.get((Long) args[0]), users.get((Long) args[1]));
+            return defaultValue(method.getReturnType());
+        });
+        service = new AnnotationServiceImpl(annotationMapper, letterMapper, logMapper,
+                (com.couple.service.letter.mapper.LetterVisibilityMapper) java.lang.reflect.Proxy.newProxyInstance(
+                        getClass().getClassLoader(),
+                        new Class<?>[]{com.couple.service.letter.mapper.LetterVisibilityMapper.class},
+                        (proxy, method, args) -> defaultValue(method.getReturnType())), userMapper);
     }
 
     @Test
@@ -123,6 +131,18 @@ class AnnotationServiceImplTest {
     }
 
     @Test
+    void historicalAnnotationShowsCancelledAuthorWithoutFailing() {
+        UserEntity author = users.get(2L);
+        author.setIsDeleted(1);
+        author.setNickname(null);
+        listedAnnotations = List.of(annotation(20L, 2L, "你好", 0, 2));
+
+        var response = service.list(1L, 10L);
+
+        assertEquals("已注销用户", response.annotations().get(0).authorNickname());
+    }
+
+    @Test
     void onlyAuthorCanDeleteAnnotation() {
         selectedAnnotation = annotation(20L, 2L, "你好", 0, 2);
 
@@ -156,6 +176,32 @@ class AnnotationServiceImplTest {
         assertEquals(0, deleteCount);
     }
 
+    @Test
+    void oldAnnotationsRemainVisibleButCannotBeAdded() {
+        listedAnnotations = List.of(annotation(20L, 1L, "你好", 0, 2));
+        users.get(1L).setPartnerId(null);
+        users.get(2L).setPartnerId(null);
+        users.get(1L).setRelationshipStatus("UNBOUND_HISTORY");
+        users.get(2L).setRelationshipStatus("UNBOUND_HISTORY");
+
+        assertEquals("回应", service.list(2L, 10L).annotations().get(0).content());
+        assertThrows(ConflictException.class, () -> service.create(2L,
+                new AnnotationCreateRequest(10L, "🙂", 2, 4, "新批注", null)));
+        assertEquals(0, logCount);
+
+        users.get(1L).setPartnerId(2L);
+        users.get(2L).setPartnerId(1L);
+        users.get(1L).setRelationshipStatus("BOUND");
+        users.get(2L).setRelationshipStatus("BOUND");
+        assertEquals("新批注", service.create(2L,
+                new AnnotationCreateRequest(10L, "🙂", 2, 4, "新批注", null)).content());
+
+        users.get(1L).setPartnerId(3L);
+        users.get(2L).setPartnerId(4L);
+        assertThrows(ConflictException.class, () -> service.create(2L,
+                new AnnotationCreateRequest(10L, "🙂", 2, 4, "不可再加", null)));
+    }
+
     private EmotionLetterEntity letter(String content, String status) {
         EmotionLetterEntity letter = new EmotionLetterEntity();
         letter.setId(10L);
@@ -183,6 +229,8 @@ class AnnotationServiceImplTest {
         UserEntity user = new UserEntity();
         user.setId(id);
         user.setNickname(nickname);
+        user.setPartnerId(id == 1L ? 2L : 1L);
+        user.setRelationshipStatus("BOUND");
         return user;
     }
 

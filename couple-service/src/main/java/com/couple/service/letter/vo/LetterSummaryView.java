@@ -18,5 +18,6 @@ public record LetterSummaryView(Long letterId,
                                 boolean isRead,
                                 LocalDateTime createdAt,
                                 LocalDateTime sentAt,
-                                LocalDateTime readAt) {
+                                LocalDateTime readAt,
+                                LocalDateTime resolvedAt) {
 }

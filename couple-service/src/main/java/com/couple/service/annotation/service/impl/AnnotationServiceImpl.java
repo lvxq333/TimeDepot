@@ -17,9 +17,11 @@ import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.entity.LetterLogEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
 import com.couple.service.letter.mapper.LetterLogMapper;
+import com.couple.service.letter.mapper.LetterVisibilityMapper;
 import com.couple.service.notification.RealtimeNotificationEvent;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.UserMapper;
+import com.couple.service.user.service.RelationshipAccess;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -41,6 +43,7 @@ public class AnnotationServiceImpl implements AnnotationService {
     private final AnnotationMapper annotationMapper;
     private final EmotionLetterMapper letterMapper;
     private final LetterLogMapper logMapper;
+    private final LetterVisibilityMapper visibilityMapper;
     private final UserMapper userMapper;
     @Autowired(required = false)
     private ApplicationEventPublisher eventPublisher;
@@ -48,10 +51,12 @@ public class AnnotationServiceImpl implements AnnotationService {
     public AnnotationServiceImpl(AnnotationMapper annotationMapper,
                                  EmotionLetterMapper letterMapper,
                                  LetterLogMapper logMapper,
+                                 LetterVisibilityMapper visibilityMapper,
                                  UserMapper userMapper) {
         this.annotationMapper = annotationMapper;
         this.letterMapper = letterMapper;
         this.logMapper = logMapper;
+        this.visibilityMapper = visibilityMapper;
         this.userMapper = userMapper;
     }
 
@@ -77,7 +82,7 @@ public class AnnotationServiceImpl implements AnnotationService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "批注保存失败，请稍后重试");
         }
         writeLog(letter.getId(), userId, "ANNOTATE", "添加原文批注", now);
-        String nickname = requireAuthor(userId).getNickname();
+        String nickname = authorNickname(userId);
         publish("ANNOTATION_CREATED", otherParticipant(userId, letter), userId, annotation,
                 Map.of("authorNickname", nickname, "quoteText", annotation.getQuoteText(),
                         "letterId", letter.getId()));
@@ -110,7 +115,7 @@ public class AnnotationServiceImpl implements AnnotationService {
             throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "回复保存失败，请稍后重试");
         }
         writeLog(letter.getId(), userId, "REPLY_ANNOTATION", "回复原文批注", now);
-        String nickname = requireAuthor(userId).getNickname();
+        String nickname = authorNickname(userId);
         Long recipientId = Objects.equals(userId, target.getAuthorId())
                 ? otherParticipant(userId, letter) : target.getAuthorId();
         publish("ANNOTATION_REPLIED", recipientId, userId, reply,
@@ -127,7 +132,7 @@ public class AnnotationServiceImpl implements AnnotationService {
         Map<Long, String> nicknames = new HashMap<>();
         List<AnnotationView> views = annotations.stream().map(annotation -> {
             String nickname = nicknames.computeIfAbsent(annotation.getAuthorId(),
-                    authorId -> requireAuthor(authorId).getNickname());
+                    this::authorNickname);
             return toView(annotation, nickname);
         }).toList();
         return new AnnotationListResponse(views);
@@ -159,6 +164,7 @@ public class AnnotationServiceImpl implements AnnotationService {
                 ? letterMapper.selectByIdForUpdate(letterId)
                 : letterMapper.selectById(letterId);
         if (letter == null) throw new NotFoundException("情绪信不存在");
+        if (visibilityMapper.isHidden(letterId, userId) > 0) throw new NotFoundException("信件已从你的历史中移除");
         if (!Objects.equals(userId, letter.getSenderId())
                 && !Objects.equals(userId, letter.getReceiverId())) {
             throw new ForbiddenException("无权查看或批注这封情绪信");
@@ -166,6 +172,7 @@ public class AnnotationServiceImpl implements AnnotationService {
         if (!DELIVERED_STATUSES.contains(letter.getStatus())) {
             throw new ForbiddenException("情绪信送达后才能添加或查看批注");
         }
+        if (lock) RelationshipAccess.requireWritable(userMapper, letter);
         return letter;
     }
 
@@ -179,9 +186,14 @@ public class AnnotationServiceImpl implements AnnotationService {
     }
 
     private UserEntity requireAuthor(Long authorId) {
-        UserEntity user = userMapper.selectById(authorId);
+        UserEntity user = userMapper.selectIncludingDeletedById(authorId);
         if (user == null) throw new NotFoundException("批注作者不存在");
         return user;
+    }
+
+    private String authorNickname(Long authorId) {
+        UserEntity author = requireAuthor(authorId);
+        return Integer.valueOf(1).equals(author.getIsDeleted()) ? "已注销用户" : author.getNickname();
     }
 
     private AnnotationView toView(AnnotationEntity annotation, String authorNickname) {

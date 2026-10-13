@@ -49,6 +49,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-couple_local_redis_password}
       JWT_SECRET: ${JWT_SECRET:-couple-local-jwt-secret-change-me-2026}
+      WS_ALLOWED_ORIGIN_PATTERNS: ${WS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:*,http://127.0.0.1:*}
       MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
       MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info
       # 本地测试默认 3 秒；上线前通过环境变量设置正式冷静期。

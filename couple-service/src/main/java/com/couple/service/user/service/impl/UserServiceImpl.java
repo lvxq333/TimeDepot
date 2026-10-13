@@ -19,6 +19,8 @@ import com.couple.service.user.entity.CoupleBindRequestEntity;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.CoupleBindRequestMapper;
 import com.couple.service.user.mapper.UserMapper;
+import com.couple.service.user.mapper.RecoveryQuestionMapper;
+import com.couple.service.user.entity.RecoveryQuestionEntity;
 import com.couple.service.user.service.UserService;
 import com.couple.service.user.vo.EntitlementsResponse;
 import com.couple.service.user.vo.CoupleBindRequestView;
@@ -32,7 +34,10 @@ import com.couple.service.user.vo.UserLoginResponse;
 import com.couple.service.user.vo.UserProfileResponse;
 import com.couple.service.user.vo.UserProfileUpdateResponse;
 import com.couple.service.user.vo.UserRegisterResponse;
+import com.couple.service.user.vo.UserUnbindResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
@@ -53,6 +58,8 @@ import java.util.Objects;
 @Service
 public class UserServiceImpl implements UserService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(UserServiceImpl.class);
+
     private static final String STATUS_UNBOUND = "UNBOUND";
     private static final String STATUS_BOUND = "BOUND";
     private static final String REQUEST_PENDING = "PENDING";
@@ -67,6 +74,7 @@ public class UserServiceImpl implements UserService {
     private static final LimitsView DEFAULT_LIMITS = new LimitsView(30, 0);
 
     private final UserMapper userMapper;
+    private final RecoveryQuestionMapper recoveryQuestionMapper;
     private final CoupleBindRequestMapper bindRequestMapper;
     private final PasswordEncoder passwordEncoder;
     private final AuthSessionService authSessionService;
@@ -77,11 +85,13 @@ public class UserServiceImpl implements UserService {
 
     public UserServiceImpl(UserMapper userMapper,
                            CoupleBindRequestMapper bindRequestMapper,
+                           RecoveryQuestionMapper recoveryQuestionMapper,
                            PasswordEncoder passwordEncoder,
                            AuthSessionService authSessionService,
                            @Value("${jwt.secret}") String jwtSecret,
                            @Value("${jwt.expire:86400}") long jwtExpireSeconds) {
         this.userMapper = userMapper;
+        this.recoveryQuestionMapper = recoveryQuestionMapper;
         this.bindRequestMapper = bindRequestMapper;
         this.passwordEncoder = passwordEncoder;
         this.authSessionService = authSessionService;
@@ -93,6 +103,16 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserRegisterResponse register(UserRegisterRequest request) {
+        if (request.recoveryQuestions() == null || request.recoveryQuestions().isEmpty()
+                || request.recoveryQuestions().size() > 3) {
+            throw new BadRequestException("请设置 1~3 个找回问题");
+        }
+        for (var item : request.recoveryQuestions()) {
+            if (item == null || item.question() == null || item.question().isBlank()
+                    || item.answer() == null || item.answer().trim().length() < 8) {
+                throw new BadRequestException("找回答案至少需要 8 个字符");
+            }
+        }
         String username = request.username().trim();
         if (userMapper.selectByUsername(username) != null) {
             throw new ConflictException("用户名已存在");
@@ -114,6 +134,17 @@ public class UserServiceImpl implements UserService {
             try {
                 if (userMapper.insert(user) != 1) {
                     throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "注册失败，请稍后重试");
+                }
+                for (int i = 0; i < request.recoveryQuestions().size(); i++) {
+                    var item = request.recoveryQuestions().get(i);
+                    RecoveryQuestionEntity recovery = new RecoveryQuestionEntity();
+                    recovery.setUserId(user.getId());
+                    recovery.setPosition(i + 1);
+                    recovery.setQuestion(item.question().trim());
+                    recovery.setAnswerHash(passwordEncoder.encode(item.answer().trim()));
+                    if (recoveryQuestionMapper.insert(recovery) != 1) {
+                        throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "保存找回问题失败");
+                    }
                 }
                 return new UserRegisterResponse(
                         user.getId(), username, nickname, user.getCoupleCode(), now);
@@ -330,10 +361,56 @@ public class UserServiceImpl implements UserService {
                 membershipOf(user), DEFAULT_FLAGS, DEFAULT_LIMITS, new UsageView(0, 0));
     }
 
-    /** Phase 1 暂不开放解绑，保留契约并明确返回 HTTP 501。 */
+    /** 同一事务内解除双方关系，保留历史数据并生成新的配对码。 */
     @Override
-    public void unbind(Long userId, UserUnbindRequest request) {
-        throw new BusinessException(HttpStatus.NOT_IMPLEMENTED, "当前版本暂不支持解绑功能");
+    @Transactional
+    public UserUnbindResponse unbind(Long userId, UserUnbindRequest request) {
+        if (!request.confirm()) {
+            throw new BadRequestException("必须确认解绑操作");
+        }
+        UserEntity current = requireUser(userId);
+        if (!isBound(current)) {
+            throw new ConflictException("当前用户未绑定伴侣");
+        }
+        Long partnerId = current.getPartnerId();
+        List<UserEntity> lockedUsers = userMapper.selectPairForUpdate(
+                Math.min(userId, partnerId), Math.max(userId, partnerId));
+        if (lockedUsers.size() != 2) {
+            throw new ConflictException("伴侣关系状态异常，请刷新后重试");
+        }
+        UserEntity lockedCurrent = findLockedUser(lockedUsers, userId);
+        UserEntity partner = findLockedUser(lockedUsers, partnerId);
+        if (!isBound(lockedCurrent) || !isBound(partner)
+                || !Objects.equals(lockedCurrent.getPartnerId(), partnerId)
+                || !Objects.equals(partner.getPartnerId(), userId)) {
+            throw new ConflictException("伴侣关系已变化，请刷新后重试");
+        }
+
+        String currentCode = freshCoupleCode();
+        String partnerCode = freshCoupleCode();
+        while (currentCode.equals(partnerCode)) partnerCode = freshCoupleCode();
+        LocalDateTime unboundAt = LocalDateTime.now();
+        try {
+            if (userMapper.updateUnbinding(userId, partnerId, currentCode, unboundAt) != 1
+                    || userMapper.updateUnbinding(partnerId, userId, partnerCode, unboundAt) != 1) {
+                throw new ConflictException("伴侣关系已变化，请刷新后重试");
+            }
+        } catch (DuplicateKeyException exception) {
+            throw new ConflictException("配对码生成冲突，请重试解绑");
+        }
+        bindRequestMapper.cancelPendingForPair(userId, partnerId, unboundAt);
+        LOG.info("用户关系解绑: userId={}, partnerId={}, reason={}", userId, partnerId,
+                request.reason() == null ? "" : request.reason().replaceAll("[\\r\\n]", " "));
+        publish("PARTNER_UNBOUND", partnerId, userId, "USER", userId, Map.of());
+        return new UserUnbindResponse("解绑成功", unboundAt, currentCode);
+    }
+
+    private String freshCoupleCode() {
+        for (int attempt = 0; attempt < CODE_GENERATION_ATTEMPTS; attempt++) {
+            String code = generateCoupleCode();
+            if (userMapper.selectByCoupleCode(code) == null) return code;
+        }
+        throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "生成配对码失败，请稍后重试");
     }
 
     private int bindOneUser(Long userId, Long partnerId, String partnerRemark,

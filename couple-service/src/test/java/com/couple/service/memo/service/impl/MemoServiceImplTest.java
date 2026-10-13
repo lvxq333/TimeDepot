@@ -19,6 +19,8 @@ import com.couple.service.memo.mapper.ConsensusMemoMapper;
 import com.couple.service.memo.mapper.ConsensusMemoRevisionMapper;
 import com.couple.service.memo.mapper.MemoCommitmentMapper;
 import com.couple.service.memo.mapper.MemoCommitmentRevisionMapper;
+import com.couple.service.user.entity.UserEntity;
+import com.couple.service.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +42,8 @@ class MemoServiceImplTest {
     private final List<MemoCommitmentEntity> commitments = new ArrayList<>();
     private final List<MemoCommitmentRevisionEntity> commitmentRevisions = new ArrayList<>();
     private EmotionLetterEntity letter;
+    private UserEntity alice;
+    private UserEntity bob;
     private long memoRevisionSequence;
     private long commitmentSequence;
     private long commitmentRevisionSequence;
@@ -54,6 +58,14 @@ class MemoServiceImplTest {
         commitmentSequence = 20;
         commitmentRevisionSequence = 30;
         letter = letter();
+        alice = new UserEntity();
+        alice.setId(1L);
+        alice.setPartnerId(2L);
+        alice.setRelationshipStatus("BOUND");
+        bob = new UserEntity();
+        bob.setId(2L);
+        bob.setPartnerId(1L);
+        bob.setRelationshipStatus("BOUND");
 
         ConsensusMemoMapper memoMapper = proxy(ConsensusMemoMapper.class, (proxy, method, args) -> {
             return switch (method.getName()) {
@@ -121,10 +133,18 @@ class MemoServiceImplTest {
                     default -> defaultValue(method.getReturnType());
                 });
         EmotionLetterMapper letterMapper = proxy(EmotionLetterMapper.class, (proxy, method, args) ->
-                "selectById".equals(method.getName()) && letter.getId().equals(args[0])
+                "countVisibleInThread".equals(method.getName()) ? 1 :
+                ("selectRootByThreadId".equals(method.getName()) && letter.getThreadId().equals(args[0])
+                        || "selectById".equals(method.getName()) && letter.getId().equals(args[0]))
                         ? letter : defaultValue(method.getReturnType()));
+        UserMapper userMapper = proxy(UserMapper.class, (proxy, method, args) -> {
+            if ("selectPairForUpdate".equals(method.getName())) return List.of(alice, bob);
+            return defaultValue(method.getReturnType());
+        });
         service = new MemoServiceImpl(memoMapper, memoRevisionMapper, commitmentMapper,
-                commitmentRevisionMapper, letterMapper);
+                commitmentRevisionMapper, letterMapper,
+                proxy(com.couple.service.letter.mapper.LetterVisibilityMapper.class,
+                        (proxy, method, args) -> defaultValue(method.getReturnType())), userMapper);
     }
 
     @Test
@@ -138,6 +158,31 @@ class MemoServiceImplTest {
         service.submit(1L, 5L);
         assertEquals("PENDING_REVIEW", service.getByLetter(2L, 1L).status());
         assertEquals("ACTIVE", service.confirm(2L, 5L).status());
+    }
+
+    @Test
+    void oldMemoResumesWithSamePartnerButNotWithOtherPartner() {
+        activateMemo();
+        alice.setPartnerId(null);
+        bob.setPartnerId(null);
+        alice.setRelationshipStatus("UNBOUND_HISTORY");
+        bob.setRelationshipStatus("UNBOUND_HISTORY");
+        assertEquals("ACTIVE", service.getByLetter(1L, 1L).status());
+        assertEquals("ACTIVE", service.getByLetter(2L, 1L).status());
+        assertThrows(ConflictException.class, () -> service.proposeMemoRevision(1L, 5L,
+                new MemoRevisionProposalRequest("旧事件", "修改", "修改", null)));
+
+        alice.setPartnerId(2L);
+        bob.setPartnerId(1L);
+        alice.setRelationshipStatus("BOUND");
+        bob.setRelationshipStatus("BOUND");
+        assertEquals("PENDING_REVIEW", service.proposeMemoRevision(1L, 5L,
+                new MemoRevisionProposalRequest("旧事件", "修改", "修改", null)).status());
+
+        alice.setPartnerId(3L);
+        bob.setPartnerId(4L);
+        assertThrows(ConflictException.class, () -> service.createCommitment(1L, 5L,
+                new CommitmentCreateRequest("新增承诺")));
     }
 
     @Test

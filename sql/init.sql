@@ -35,6 +35,15 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
 -- 2. 登录会话表（MySQL 为权威数据源，Redis 为访问缓存）
+CREATE TABLE `user_recovery_question` (
+    `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `user_id` BIGINT NOT NULL,
+    `position` TINYINT NOT NULL,
+    `question` VARCHAR(100) NOT NULL,
+    `answer_hash` VARCHAR(255) NOT NULL,
+    UNIQUE INDEX `uk_recovery_user_position` (`user_id`, `position`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `auth_session` (
     `id`              BIGINT       PRIMARY KEY AUTO_INCREMENT COMMENT '会话记录 ID',
     `session_id`      VARCHAR(64)  NOT NULL                    COMMENT 'JWT sid，对外不暴露数据库主键',
@@ -102,9 +111,36 @@ CREATE TABLE `emotion_letter` (
     INDEX `idx_sender_status`    (`sender_id`, `status`),
     INDEX `idx_receiver_status`  (`receiver_id`, `status`),
     INDEX `idx_thread_created_at` (`thread_id`, `created_at`),
+    INDEX `idx_emotion_created_thread` (`emotion_tag`, `created_at`, `thread_id`),
+    INDEX `idx_thread_activity` (`thread_id`, `sent_at`, `created_at`),
     INDEX `idx_reply_to_letter_id` (`reply_to_letter_id`),
     INDEX `idx_created_at`       (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='情绪信表';
+
+-- 4.1 情绪信事件线程（列表分页和事件状态）
+CREATE TABLE `letter_visibility` (
+    `letter_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `hidden_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`letter_id`, `user_id`),
+    INDEX `idx_letter_visibility_user` (`user_id`, `letter_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `letter_thread` (
+    `thread_id`        CHAR(36)     PRIMARY KEY,
+    `title`            VARCHAR(100),
+    `participant_a_id` BIGINT       NOT NULL,
+    `participant_b_id` BIGINT       NOT NULL,
+    `status`           VARCHAR(20)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/RESOLVED/REOPENED/CLOSED',
+    `resolved_by`      BIGINT,
+    `resolved_at`      DATETIME,
+    `reopened_at`      DATETIME,
+    `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_letter_thread_participant_a` (`participant_a_id`, `updated_at`),
+    INDEX `idx_letter_thread_participant_b` (`participant_b_id`, `updated_at`),
+    INDEX `idx_letter_thread_status` (`status`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='情绪信事件线程';
 
 -- 5. 批注表
 CREATE TABLE `annotation` (

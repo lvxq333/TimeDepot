@@ -1,10 +1,13 @@
 package com.couple.api.websocket;
 
 import com.couple.common.security.CurrentUser;
+import com.couple.common.exception.UnauthorizedException;
+import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
 import com.couple.service.user.entity.UserEntity;
 import com.couple.service.user.mapper.UserMapper;
+import com.couple.service.user.service.RelationshipAccess;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -27,15 +30,19 @@ public class TypingWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final EmotionLetterMapper letterMapper;
     private final UserMapper userMapper;
+    private final AuthSessionService authSessionService;
     private final ConcurrentHashMap<Long, Set<WebSocketSession>> userSessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ActiveTyping> activeTyping = new ConcurrentHashMap<>();
 
+    /** 注入信件、用户和会话服务，建立输入状态的安全转发路径。 */
     public TypingWebSocketHandler(ObjectMapper objectMapper,
                                   EmotionLetterMapper letterMapper,
-                                  UserMapper userMapper) {
+                                  UserMapper userMapper,
+                                  AuthSessionService authSessionService) {
         this.objectMapper = objectMapper;
         this.letterMapper = letterMapper;
         this.userMapper = userMapper;
+        this.authSessionService = authSessionService;
     }
 
     @Override
@@ -46,8 +53,10 @@ public class TypingWebSocketHandler extends TextWebSocketHandler {
         send(session, Map.of("type", "CONNECTED"));
     }
 
+    /** 收到心跳或输入状态前复查会话，并保留原有信件参与关系校验。 */
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        if (!requireActive(session)) return;
         if ("PING".equalsIgnoreCase(message.getPayload())) {
             send(session, Map.of("type", "PONG"));
             return;
@@ -107,6 +116,10 @@ public class TypingWebSocketHandler extends TextWebSocketHandler {
             throw new IllegalArgumentException("无权发送该信件的输入状态");
         }
         UserEntity sender = userMapper.selectById(currentUser.userId());
+        UserEntity recipient = userMapper.selectById(recipientId);
+        if (!RelationshipAccess.canWrite(sender, recipient, letter)) {
+            throw new IllegalArgumentException("原信件双方当前未互相绑定，无法发送输入状态");
+        }
         String nickname = sender == null || sender.getNickname() == null || sender.getNickname().isBlank()
                 ? currentUser.username() : sender.getNickname();
         return new TypingRoute(recipientId, nickname);
@@ -130,11 +143,13 @@ public class TypingWebSocketHandler extends TextWebSocketHandler {
         send(session, Map.of("type", "ERROR", "code", 400, "message", message));
     }
 
+    /** 向接收方发送事件前复查其会话，避免已退出账号继续接收输入状态。 */
     private void send(WebSocketSession session, Object payload) {
         if (!session.isOpen()) {
             remove(session);
             return;
         }
+        if (!requireActive(session)) return;
         try {
             String json = objectMapper.writeValueAsString(payload);
             synchronized (session) {
@@ -147,6 +162,23 @@ public class TypingWebSocketHandler extends TextWebSocketHandler {
             } catch (IOException ignored) {
                 // 连接已经不可用，无需再次处理。
             }
+        }
+    }
+
+    /** 在心跳、输入事件和向接收方转发前检查会话，避免已退出连接继续收发。 */
+    private boolean requireActive(WebSocketSession session) {
+        try {
+            authSessionService.requireActiveSession(currentUser(session));
+            return true;
+        } catch (UnauthorizedException exception) {
+            stopActiveTyping(session);
+            remove(session);
+            try {
+                session.close(CloseStatus.POLICY_VIOLATION);
+            } catch (IOException ignored) {
+                // 连接已经断开，无需再次关闭。
+            }
+            return false;
         }
     }
 

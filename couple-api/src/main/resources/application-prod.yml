@@ -19,6 +19,10 @@ jwt:
 letter:
   cooldown-seconds: ${LETTER_COOLDOWN_SECONDS:180}
 
+app:
+  websocket:
+    allowed-origin-patterns: ${WS_ALLOWED_ORIGIN_PATTERNS}
+
 management:
   endpoint:
     health:

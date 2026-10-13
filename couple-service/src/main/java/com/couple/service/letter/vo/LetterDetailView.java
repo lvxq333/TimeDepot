@@ -24,5 +24,6 @@ public record LetterDetailView(Long letterId,
                                LocalDateTime resolvedAt,
                                LocalDateTime cooldownEndAt,
                                List<Object> annotations,
-                               Object consensusMemo) {
+                               Object consensusMemo,
+                               boolean editable) {
 }

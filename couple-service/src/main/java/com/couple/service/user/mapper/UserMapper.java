@@ -14,9 +14,36 @@ import java.util.List;
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
 
+    @Select("SELECT * FROM `user` WHERE id = #{userId} AND is_deleted = 0 FOR UPDATE")
+    UserEntity selectByIdForUpdate(@Param("userId") Long userId);
+
+    /** 历史信件展示使用；注销用户只返回已脱敏的占位资料。 */
+    @Select("SELECT * FROM `user` WHERE id = #{userId} LIMIT 1")
+    UserEntity selectIncludingDeletedById(@Param("userId") Long userId);
+
+    @Update("UPDATE `user` SET username = CONCAT('deleted-', id), password = #{passwordHash}, "
+            + "nickname = NULL, couple_code = NULL, partner_id = NULL, partner_remark = NULL, "
+            + "relationship_status = 'UNBOUND', membership_plan = 'FREE', membership_expire_at = NULL, "
+            + "is_deleted = 1, updated_at = NOW() WHERE id = #{userId} AND is_deleted = 0")
+    int markAccountDeleted(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
+
+    @Update("UPDATE `user` SET partner_id = NULL, partner_remark = NULL, "
+            + "relationship_status = 'UNBOUND_HISTORY', unbound_at = NOW(), "
+            + "couple_code = #{coupleCode}, updated_at = NOW() "
+            + "WHERE id = #{partnerId} AND partner_id = #{userId} AND is_deleted = 0")
+    int detachDeletedPartner(@Param("partnerId") Long partnerId, @Param("userId") Long userId,
+                             @Param("coupleCode") String coupleCode);
+
     /** 按用户名查询未删除用户。 */
     @Select("SELECT * FROM `user` WHERE username = #{username} AND is_deleted = 0 LIMIT 1")
     UserEntity selectByUsername(@Param("username") String username);
+
+    @Select("SELECT * FROM `user` WHERE username = #{username} AND is_deleted = 0 FOR UPDATE")
+    UserEntity selectByUsernameForUpdate(@Param("username") String username);
+
+    @Update("UPDATE `user` SET password = #{passwordHash}, updated_at = NOW() "
+            + "WHERE id = #{userId} AND is_deleted = 0")
+    int updatePassword(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
 
     /** 按配对码查询未删除用户，用于绑定前定位目标账号。 */
     @Select("SELECT * FROM `user` WHERE couple_code = #{coupleCode} AND is_deleted = 0 LIMIT 1")
@@ -39,6 +66,16 @@ public interface UserMapper extends BaseMapper<UserEntity> {
                       @Param("partnerId") Long partnerId,
                       @Param("partnerRemark") String partnerRemark,
                       @Param("boundAt") LocalDateTime boundAt);
+
+    @Update("UPDATE `user` SET partner_id = NULL, partner_remark = NULL, "
+            + "relationship_status = 'UNBOUND_HISTORY', "
+            + "unbound_at = #{unboundAt}, couple_code = #{coupleCode}, updated_at = #{unboundAt} "
+            + "WHERE id = #{userId} AND partner_id = #{partnerId} "
+            + "AND relationship_status = 'BOUND' AND is_deleted = 0")
+    int updateUnbinding(@Param("userId") Long userId,
+                        @Param("partnerId") Long partnerId,
+                        @Param("coupleCode") String coupleCode,
+                        @Param("unboundAt") LocalDateTime unboundAt);
 
     /** 修改指定用户昵称。 */
     @Update("UPDATE `user` SET nickname = #{nickname}, updated_at = #{updatedAt} "

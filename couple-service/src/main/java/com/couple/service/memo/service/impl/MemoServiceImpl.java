@@ -7,6 +7,9 @@ import com.couple.common.exception.ForbiddenException;
 import com.couple.common.exception.NotFoundException;
 import com.couple.service.letter.entity.EmotionLetterEntity;
 import com.couple.service.letter.mapper.EmotionLetterMapper;
+import com.couple.service.letter.entity.LetterThreadEntity;
+import com.couple.service.letter.mapper.LetterThreadMapper;
+import com.couple.service.letter.mapper.LetterVisibilityMapper;
 import com.couple.service.memo.dto.CommitmentCreateRequest;
 import com.couple.service.memo.dto.CommitmentRevisionRequest;
 import com.couple.service.memo.dto.MemoCreateRequest;
@@ -27,6 +30,8 @@ import com.couple.service.memo.vo.CommitmentView;
 import com.couple.service.memo.vo.ConsensusMemoView;
 import com.couple.service.memo.vo.MemoRevisionView;
 import com.couple.service.notification.RealtimeNotificationEvent;
+import com.couple.service.user.mapper.UserMapper;
+import com.couple.service.user.service.RelationshipAccess;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
@@ -61,25 +66,34 @@ public class MemoServiceImpl implements MemoService {
     private final MemoCommitmentMapper commitmentMapper;
     private final MemoCommitmentRevisionMapper commitmentRevisionMapper;
     private final EmotionLetterMapper letterMapper;
+    private final LetterVisibilityMapper visibilityMapper;
+    private final UserMapper userMapper;
     @Autowired(required = false)
     private ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private LetterThreadMapper threadMapper;
 
     public MemoServiceImpl(ConsensusMemoMapper memoMapper,
                            ConsensusMemoRevisionMapper memoRevisionMapper,
                            MemoCommitmentMapper commitmentMapper,
                            MemoCommitmentRevisionMapper commitmentRevisionMapper,
-                           EmotionLetterMapper letterMapper) {
+                           EmotionLetterMapper letterMapper,
+                           LetterVisibilityMapper visibilityMapper,
+                           UserMapper userMapper) {
         this.memoMapper = memoMapper;
         this.memoRevisionMapper = memoRevisionMapper;
         this.commitmentMapper = commitmentMapper;
         this.commitmentRevisionMapper = commitmentRevisionMapper;
         this.letterMapper = letterMapper;
+        this.visibilityMapper = visibilityMapper;
+        this.userMapper = userMapper;
     }
 
     @Override
     @Transactional
     public ConsensusMemoView create(Long userId, MemoCreateRequest request) {
         EmotionLetterEntity anchor = requireVisibleLetter(userId, request.letterId());
+        RelationshipAccess.requireWritable(userMapper, anchor);
         if (!Set.of("READ", "RESOLVED").contains(anchor.getStatus())) {
             throw new ConflictException("至少需要先阅读这封信，才能开始整理共识备忘录");
         }
@@ -285,6 +299,18 @@ public class MemoServiceImpl implements MemoService {
         memo.setResolvedAt(now);
         memo.setUpdatedAt(now);
         updateMemoOrFail(memo);
+        if (threadMapper != null) {
+            LetterThreadEntity thread = threadMapper.selectByIdForUpdate(memo.getThreadId());
+            if (thread != null) {
+                thread.setStatus("CLOSED");
+                thread.setResolvedBy(userId);
+                thread.setResolvedAt(now);
+                thread.setUpdatedAt(now);
+                threadMapper.updateById(thread);
+            }
+        }
+        publish("EVENT_RESOLVED", otherParticipant(userId, memo), userId, memo,
+                Map.of("threadId", memo.getThreadId()));
         return toView(userId, memo);
     }
 
@@ -482,6 +508,9 @@ public class MemoServiceImpl implements MemoService {
         if (memo == null) throw new NotFoundException("共识备忘录不存在");
         requireParticipant(userId, memo);
         if (!allowPrivateOwner || !Objects.equals(userId, memo.getCreatedBy())) requireMemoVisible(userId, memo);
+        EmotionLetterEntity root = letterMapper.selectRootByThreadId(memo.getThreadId());
+        if (root == null) throw new NotFoundException("原始情绪信不存在");
+        RelationshipAccess.requireWritable(userMapper, root);
         return memo;
     }
 
@@ -691,6 +720,7 @@ public class MemoServiceImpl implements MemoService {
         if (letter == null || Integer.valueOf(1).equals(letter.getIsDeleted())) {
             throw new NotFoundException("情绪信不存在");
         }
+        if (visibilityMapper.isHidden(letterId, userId) > 0) throw new NotFoundException("信件已从你的历史中移除");
         boolean sender = Objects.equals(userId, letter.getSenderId());
         boolean receiver = Objects.equals(userId, letter.getReceiverId());
         if (!sender && !receiver) throw new ForbiddenException("无权查看这个情绪事件");
@@ -704,6 +734,9 @@ public class MemoServiceImpl implements MemoService {
         if (!Objects.equals(userId, memo.getParticipantAId())
                 && !Objects.equals(userId, memo.getParticipantBId())) {
             throw new ForbiddenException("无权访问这份共识备忘录");
+        }
+        if (letterMapper.countVisibleInThread(userId, memo.getThreadId()) == 0) {
+            throw new NotFoundException("共识备忘录不可用");
         }
     }
 

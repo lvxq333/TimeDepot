@@ -1,9 +1,7 @@
 package com.couple.api.websocket;
 
-import com.couple.api.config.JwtProperties;
+import com.couple.common.exception.UnauthorizedException;
 import com.couple.common.security.CurrentUser;
-import com.couple.common.security.JwtTokenUtil;
-import com.couple.service.auth.service.AuthSessionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.server.ServerHttpRequest;
@@ -12,7 +10,7 @@ import org.springframework.web.socket.WebSocketHandler;
 
 import java.lang.reflect.Proxy;
 import java.net.URI;
-import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -22,51 +20,40 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WebSocketAuthHandshakeInterceptorTest {
-    private static final String SECRET = "test-secret-must-contain-at-least-32-bytes";
+    private static final String TICKET = "A".repeat(43);
 
     @Test
     void acceptsActiveSessionAndExposesCurrentUser() {
-        AtomicReference<CurrentUser> checked = new AtomicReference<>();
-        var interceptor = new WebSocketAuthHandshakeInterceptor(properties(), sessions(checked, false));
-        String token = JwtTokenUtil.createToken(SECRET, 7L, "alice", "session-1", Duration.ofMinutes(5));
+        CurrentUser expected = new CurrentUser(7L, "alice", "session-1", Instant.now().plusSeconds(60));
+        var interceptor = new WebSocketAuthHandshakeInterceptor(new WebSocketTicketService(null, null) {
+            @Override public CurrentUser consume(String ticket) {
+                assertEquals(TICKET, ticket);
+                return expected;
+            }
+        });
         Map<String, Object> attributes = new HashMap<>();
-        assertTrue(interceptor.beforeHandshake(request("ws://localhost/ws/notification?token=" + token),
+        assertTrue(interceptor.beforeHandshake(request("ws://localhost/ws/notification?ticket=" + TICKET),
                 response(new AtomicReference<>()), handler(), attributes));
         CurrentUser user = (CurrentUser) attributes.get(WebSocketAuthHandshakeInterceptor.CURRENT_USER_ATTRIBUTE);
         assertEquals(7L, user.userId());
-        assertEquals("session-1", checked.get().sessionId());
+        assertEquals("session-1", user.sessionId());
     }
 
     @Test
     void rejectsMissingOrRevokedSession() {
         AtomicReference<HttpStatusCode> missing = new AtomicReference<>();
         AtomicReference<HttpStatusCode> revoked = new AtomicReference<>();
-        String token = JwtTokenUtil.createToken(SECRET, 7L, "alice", "session-1", Duration.ofMinutes(5));
-        var activeInterceptor = new WebSocketAuthHandshakeInterceptor(properties(), sessions(new AtomicReference<>(), false));
-        var revokedInterceptor = new WebSocketAuthHandshakeInterceptor(properties(), sessions(new AtomicReference<>(), true));
-        assertFalse(activeInterceptor.beforeHandshake(request("ws://localhost/ws/notification"), response(missing),
+        var interceptor = new WebSocketAuthHandshakeInterceptor(new WebSocketTicketService(null, null) {
+            @Override public CurrentUser consume(String ticket) {
+                throw new UnauthorizedException(ticket == null ? "missing" : "revoked");
+            }
+        });
+        assertFalse(interceptor.beforeHandshake(request("ws://localhost/ws/notification"), response(missing),
                 handler(), new HashMap<>()));
-        assertFalse(revokedInterceptor.beforeHandshake(request("ws://localhost/ws/notification?token=" + token),
+        assertFalse(interceptor.beforeHandshake(request("ws://localhost/ws/notification?ticket=" + TICKET),
                 response(revoked), handler(), new HashMap<>()));
         assertEquals(401, missing.get().value());
         assertEquals(401, revoked.get().value());
-    }
-
-    private AuthSessionService sessions(AtomicReference<CurrentUser> checked, boolean revoked) {
-        return new AuthSessionService() {
-            @Override public String createSession(Long userId, String username, Duration ttl) { return null; }
-            @Override public void requireActiveSession(CurrentUser user) {
-                checked.set(user);
-                if (revoked) throw new IllegalStateException("revoked");
-            }
-            @Override public void revokeCurrentSession(CurrentUser user) { }
-        };
-    }
-
-    private JwtProperties properties() {
-        JwtProperties result = new JwtProperties();
-        result.setSecret(SECRET);
-        return result;
     }
 
     private ServerHttpRequest request(String uri) {
