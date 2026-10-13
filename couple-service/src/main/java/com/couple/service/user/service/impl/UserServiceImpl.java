@@ -49,6 +49,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,6 +72,7 @@ public class UserServiceImpl implements UserService {
     private static final int CODE_LENGTH = 6;
     private static final int CODE_GENERATION_ATTEMPTS = 20;
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final FeatureFlagsView DEFAULT_FLAGS = new FeatureFlagsView(false, true, false);
     private static final LimitsView DEFAULT_LIMITS = new LimitsView(30, 0);
 
@@ -305,32 +308,63 @@ public class UserServiceImpl implements UserService {
     public UserProfileResponse getProfile(Long userId) {
         UserEntity user = requireUser(userId);
         UserEntity partner = findPartner(user);
+        boolean canChangeNickname = canChangeNickname(user, LocalDateTime.now(BUSINESS_ZONE));
         return new UserProfileResponse(
                 user.getId(), user.getUsername(), user.getNickname(), user.getCoupleCode(), isBound(user),
                 user.getPartnerId(), partner == null ? null : partner.getNickname(),
                 user.getPartnerRemark(), user.getBoundAt(), membershipOf(user),
-                DEFAULT_FLAGS, DEFAULT_LIMITS);
+                DEFAULT_FLAGS, DEFAULT_LIMITS, canChangeNickname ? 1 : 0,
+                canChangeNickname ? null : nextNicknameChangeAt(user));
     }
 
-    /** 修改当前用户昵称；空请求保持原值不变。 */
+    /** 在数据库事务中限制每个北京时间自然月最多实际修改一次昵称。 */
     @Override
     @Transactional
     public UserProfileUpdateResponse updateProfile(Long userId, UserProfileUpdateRequest request) {
-        UserEntity user = requireUser(userId);
+        // 行锁使同一账号的并发修改串行化，多个设备不能同时消费本月额度。
+        UserEntity user = userMapper.selectByIdForUpdate(userId);
+        if (user == null) throw new UnauthorizedException("用户不存在或已注销");
         if (request.nickname() == null) {
-            return new UserProfileUpdateResponse(
-                    user.getId(), user.getUsername(), user.getNickname(), user.getUpdatedAt());
+            return profileUpdateResponse(user, user.getNickname(), user.getUpdatedAt());
         }
         String nickname = request.nickname().trim();
         if (nickname.isEmpty()) {
             throw new BadRequestException("昵称不能为空");
         }
-        LocalDateTime updatedAt = LocalDateTime.now();
+        if (nickname.equals(user.getNickname())) {
+            return profileUpdateResponse(user, user.getNickname(), user.getUpdatedAt());
+        }
+        LocalDateTime updatedAt = LocalDateTime.now(BUSINESS_ZONE);
+        if (!canChangeNickname(user, updatedAt)) {
+            throw new ConflictException("本月昵称修改机会已用完，"
+                    + nextNicknameChangeAt(user).toLocalDate() + "（北京时间）可再次修改");
+        }
         int updated = userMapper.updateNickname(userId, nickname, updatedAt);
         if (updated != 1) {
             throw new NotFoundException("用户不存在");
         }
-        return new UserProfileUpdateResponse(user.getId(), user.getUsername(), nickname, updatedAt);
+        user.setNicknameChangedAt(updatedAt);
+        return profileUpdateResponse(user, nickname, updatedAt);
+    }
+
+    /** 将数据库中的昵称额度状态与修改结果一并返回，供前端直接更新展示。 */
+    private UserProfileUpdateResponse profileUpdateResponse(UserEntity user, String nickname,
+                                                            LocalDateTime updatedAt) {
+        boolean available = canChangeNickname(user, LocalDateTime.now(BUSINESS_ZONE));
+        return new UserProfileUpdateResponse(user.getId(), user.getUsername(), nickname, updatedAt,
+                available ? 1 : 0, available ? null : nextNicknameChangeAt(user));
+    }
+
+    /** 判断最近一次真实修改是否早于当前北京时间自然月。 */
+    private boolean canChangeNickname(UserEntity user, LocalDateTime now) {
+        LocalDateTime changedAt = user.getNicknameChangedAt();
+        LocalDateTime monthStart = YearMonth.from(now).atDay(1).atStartOfDay();
+        return changedAt == null || changedAt.isBefore(monthStart);
+    }
+
+    /** 返回本次已使用额度对应的下一自然月第一天零点。 */
+    private LocalDateTime nextNicknameChangeAt(UserEntity user) {
+        return YearMonth.from(user.getNicknameChangedAt()).plusMonths(1).atDay(1).atStartOfDay();
     }
 
     /** 修改当前用户视角下的伴侣备注，不改变对方昵称。 */

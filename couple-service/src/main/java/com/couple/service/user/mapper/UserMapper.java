@@ -22,7 +22,8 @@ public interface UserMapper extends BaseMapper<UserEntity> {
     UserEntity selectIncludingDeletedById(@Param("userId") Long userId);
 
     @Update("UPDATE `user` SET username = CONCAT('deleted-', id), password = #{passwordHash}, "
-            + "nickname = NULL, couple_code = NULL, partner_id = NULL, partner_remark = NULL, "
+            + "nickname = NULL, nickname_changed_at = NULL, couple_code = NULL, "
+            + "partner_id = NULL, partner_remark = NULL, "
             + "relationship_status = 'UNBOUND', membership_plan = 'FREE', membership_expire_at = NULL, "
             + "is_deleted = 1, updated_at = NOW() WHERE id = #{userId} AND is_deleted = 0")
     int markAccountDeleted(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
@@ -77,8 +78,9 @@ public interface UserMapper extends BaseMapper<UserEntity> {
                         @Param("coupleCode") String coupleCode,
                         @Param("unboundAt") LocalDateTime unboundAt);
 
-    /** 修改指定用户昵称。 */
-    @Update("UPDATE `user` SET nickname = #{nickname}, updated_at = #{updatedAt} "
+    /** 同时持久化昵称与本月修改时间；调用方须先锁定用户行并检查月度额度。 */
+    @Update("UPDATE `user` SET nickname = #{nickname}, nickname_changed_at = #{updatedAt}, "
+            + "updated_at = #{updatedAt} "
             + "WHERE id = #{userId} AND is_deleted = 0")
     int updateNickname(@Param("userId") Long userId,
                        @Param("nickname") String nickname,

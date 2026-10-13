@@ -7,6 +7,7 @@ import com.couple.common.security.CurrentUser;
 import com.couple.service.auth.service.AuthSessionService;
 import com.couple.service.user.dto.UserBindRequest;
 import com.couple.service.user.dto.UserLoginRequest;
+import com.couple.service.user.dto.UserProfileUpdateRequest;
 import com.couple.service.user.dto.UserRegisterRequest;
 import com.couple.service.user.dto.RecoveryQuestionRequest;
 import com.couple.service.user.dto.UserUnbindRequest;
@@ -27,6 +28,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.time.Duration;
+import java.time.YearMonth;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +123,32 @@ class UserServiceImplTest {
                 () -> userService.login(new UserLoginRequest("alice", "wrong-password")));
 
         assertEquals("用户名或密码错误", exception.getMessage());
+    }
+
+    @Test
+    void nicknameCanChangeOnlyOncePerBeijingCalendarMonth() {
+        UserEntity alice = user(1L, "alice");
+        mapperStub.usersById.put(1L, alice);
+
+        assertEquals(1, userService.getProfile(1L).nicknameChangesRemaining());
+        var first = userService.updateProfile(1L, new UserProfileUpdateRequest("Alice"));
+        assertEquals(0, first.nicknameChangesRemaining());
+        assertEquals("Alice", alice.getNickname());
+        assertEquals(1, mapperStub.nicknameUpdateCount);
+
+        // 与当前昵称相同的请求是空操作，不再次占用额度。
+        userService.updateProfile(1L, new UserProfileUpdateRequest(" Alice "));
+        assertEquals(1, mapperStub.nicknameUpdateCount);
+        assertThrows(ConflictException.class,
+                () -> userService.updateProfile(1L, new UserProfileUpdateRequest("Alice Two")));
+        assertEquals(1, mapperStub.nicknameUpdateCount);
+
+        // 模拟进入下一自然月；历史修改时间早于本月月初后可再次修改。
+        alice.setNicknameChangedAt(YearMonth.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .minusMonths(1).atDay(1).atStartOfDay());
+        assertEquals(1, userService.getProfile(1L).nicknameChangesRemaining());
+        userService.updateProfile(1L, new UserProfileUpdateRequest("Alice Two"));
+        assertEquals(2, mapperStub.nicknameUpdateCount);
     }
 
     @Test
@@ -243,6 +271,7 @@ class UserServiceImplTest {
         private UserEntity inserted;
         private int bindingUpdateCount;
         private int unbindingUpdateCount;
+        private int nicknameUpdateCount;
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
@@ -250,6 +279,7 @@ class UserServiceImplTest {
                 case "selectByUsername" -> usersByUsername.get((String) args[0]);
                 case "selectByCoupleCode" -> usersByCoupleCode.get((String) args[0]);
                 case "selectById" -> usersById.get((Long) args[0]);
+                case "selectByIdForUpdate" -> usersById.get((Long) args[0]);
                 case "selectPairForUpdate" -> lockedPair;
                 case "insert" -> insert((UserEntity) args[0]);
                 case "updateBinding" -> {
@@ -266,7 +296,14 @@ class UserServiceImplTest {
                     unbindingUpdateCount++;
                     yield 1;
                 }
-                case "updateNickname", "updatePartnerRemark" -> 1;
+                case "updateNickname" -> {
+                    UserEntity user = usersById.get((Long) args[0]);
+                    user.setNickname((String) args[1]);
+                    user.setNicknameChangedAt((LocalDateTime) args[2]);
+                    nicknameUpdateCount++;
+                    yield 1;
+                }
+                case "updatePartnerRemark" -> 1;
                 case "toString" -> "StubUserMapper";
                 case "hashCode" -> System.identityHashCode(proxy);
                 case "equals" -> proxy == args[0];

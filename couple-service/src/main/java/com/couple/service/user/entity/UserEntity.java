@@ -16,6 +16,7 @@ public class UserEntity {
     private String username;
     private String password;
     private String nickname;
+    private LocalDateTime nicknameChangedAt;
     private String coupleCode;
     private Long partnerId;
     private String partnerRemark;
@@ -61,6 +62,16 @@ public class UserEntity {
 
     public void setNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    /** 返回最近一次实际修改昵称的北京时间；注册时为空。 */
+    public LocalDateTime getNicknameChangedAt() {
+        return nicknameChangedAt;
+    }
+
+    /** 记录昵称修改时间，用于后端按自然月限制次数。 */
+    public void setNicknameChangedAt(LocalDateTime nicknameChangedAt) {
+        this.nicknameChangedAt = nicknameChangedAt;
     }
 
     public String getCoupleCode() {

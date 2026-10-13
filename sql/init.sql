@@ -16,6 +16,7 @@ CREATE TABLE `user` (
     `username`            VARCHAR(50)  NOT NULL UNIQUE              COMMENT '用户名',
     `password`            VARCHAR(255) NOT NULL                     COMMENT '密码（BCrypt 加密）',
     `nickname`            VARCHAR(50)                               COMMENT '昵称，默认取 username',
+    `nickname_changed_at` DATETIME                                  COMMENT '最近一次实际修改昵称的北京时间，注册昵称不计入',
     `couple_code`         VARCHAR(32)                               COMMENT '6 位配对码，绑定后清空',
     `partner_id`          BIGINT                                    COMMENT '伴侣的用户 ID',
     `partner_remark`      VARCHAR(50)                               COMMENT '我给伴侣设置的备注名',

@@ -7,5 +7,6 @@ public record UserProfileResponse(Long userId, String username, String nickname,
                                   boolean isBound, Long partnerId,
                                   String partnerNickname, String partnerRemark,
                                   LocalDateTime boundAt, MembershipView membership,
-                                  FeatureFlagsView featureFlags, LimitsView limits) {
+                                  FeatureFlagsView featureFlags, LimitsView limits,
+                                  int nicknameChangesRemaining, LocalDateTime nextNicknameChangeAt) {
 }
